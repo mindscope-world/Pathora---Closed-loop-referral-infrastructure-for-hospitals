@@ -4,6 +4,7 @@ import { logger } from './lib/logger';
 import { startExportWorker } from './jobs/exportWorker';
 import { startSlaMonitor } from './jobs/slaMonitor';
 import { startMessageWorker } from './jobs/messageWorker';
+import { startReportScheduler } from './jobs/reportScheduler';
 
 const app = createApp();
 const server = app.listen(env.PORT, () => {
@@ -12,6 +13,7 @@ const server = app.listen(env.PORT, () => {
 const stopExportWorker = startExportWorker();
 const stopSlaMonitor = startSlaMonitor();
 const stopMessageWorker = startMessageWorker();
+const stopReportScheduler = startReportScheduler();
 
 let shuttingDown = false;
 function shutdown(signal: string) {
@@ -21,6 +23,7 @@ function shutdown(signal: string) {
   stopExportWorker();
   stopSlaMonitor();
   stopMessageWorker();
+  stopReportScheduler();
   server.close((err) => {
     if (err) {
       logger.error({ err }, 'Error during shutdown');

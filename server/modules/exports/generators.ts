@@ -4,6 +4,8 @@ import type { Prisma } from '../../db/generated/client';
 import { csvRow, type CsvValue } from '../../lib/csv';
 import { consentState } from '../cases/dto';
 import { deriveStatus, slaHoursRemaining } from '../cases/sla';
+import { PATHWAY_ORDER, summariseGroup, type MetricRow } from '../metrics/compute';
+import { metricRowSelect } from '../metrics/service';
 
 /** Receives rows; the worker backs it with a file. */
 export interface Sink {
@@ -133,4 +135,52 @@ export async function generateAuditCsv(ctx: GenerateContext, sink: Sink): Promis
     if (rows.length < BATCH) break;
   }
   return { rowCount, chainTip };
+}
+
+export const GOVERNANCE_COLUMNS = [
+  'Pathway', 'Facility', 'Referrals', 'Facility Acknowledged', 'Patient Attended', 'Closed Verified', 'Completion Rate %',
+  'Overdue SLA', 'Red Flags', 'Median Hours To Acknowledge', 'Median Hours To Close',
+] as const;
+
+const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+
+/**
+ * Programme performance for funders and clinical-governance committees: one row per pathway and facility, then
+ * a per-pathway subtotal and a programme total. Aggregates only; no patient is identifiable from it. Uses the
+ * same arithmetic as the dashboard (metrics/compute.ts), so the report and the screen cannot disagree.
+ * `from`/`to` bound the cohort by the date referrals were issued.
+ */
+export async function generateGovernanceCsv(ctx: GenerateContext, sink: Sink): Promise<GenerateResult> {
+  await sink.row([...GOVERNANCE_COLUMNS]);
+  const rows = (await prisma.referralCase.findMany({
+    where: { orgId: ctx.orgId, isSynthetic: false, ...(ctx.params.from || ctx.params.to ? { issuedAt: range(ctx.params) } : {}) },
+    select: metricRowSelect,
+  })) as unknown as MetricRow[];
+  const facilities = new Map((await prisma.facility.findMany({ where: { orgId: ctx.orgId }, select: { id: true, name: true } })).map((f) => [f.id, f.name]));
+
+  const line = (pathway: string, facility: string, group: MetricRow[]): CsvValue[] => {
+    const s = summariseGroup(group, ctx.now);
+    return [
+      pathway, facility, s.referrals, s.acknowledged, s.attended, s.closedVerified, pct(s.closedVerified, s.referrals),
+      s.overdueSla, s.redFlags, s.medianHoursToAcknowledge, s.medianHoursToClose,
+    ];
+  };
+
+  let rowCount = 0;
+  for (const pathway of PATHWAY_ORDER) {
+    const mine = rows.filter((r) => r.pathway === pathway);
+    if (mine.length === 0) continue;
+    const byFacility = new Map<string, MetricRow[]>();
+    for (const r of mine) byFacility.set(r.facilityId, [...(byFacility.get(r.facilityId) ?? []), r]);
+    const named = [...byFacility].map(([id, g]) => [facilities.get(id) ?? 'Unknown facility', g] as const).sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [name, g] of named) {
+      await sink.row(line(PATHWAY_LABELS[pathway], name, g));
+      rowCount++;
+    }
+    await sink.row(line(PATHWAY_LABELS[pathway], 'All facilities', mine));
+    rowCount++;
+  }
+  await sink.row(line('All pathways', 'All facilities', rows));
+  rowCount++;
+  return { rowCount };
 }

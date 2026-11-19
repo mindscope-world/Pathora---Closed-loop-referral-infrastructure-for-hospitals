@@ -25,6 +25,7 @@ import * as workspaceApi from '../../api/workspace';
 import * as commsApi from '../../api/comms';
 import { ApiError } from '../../lib/api';
 import { describeApiError, useWorkspace } from '../../data/useWorkspace';
+import { useMetrics } from '../../data/useMetrics';
 import {
 } from '../../data/dashboardData';
 import { OverviewView } from './OverviewView';
@@ -65,6 +66,8 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   // Referrals, facilities and assignable owners come from the API.
   const ws = useWorkspace(role);
   const { cases, facilities, assignees } = ws;
+  // Headline figures are computed by the server; reload them whenever the case list changes.
+  const metrics = useMetrics(activeTab === 'overview', ws.cases);
 
   // Everything on this dashboard is server-backed. The audit trail records each action itself (see AuditView).
 
@@ -590,6 +593,11 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           {activeTab === 'overview' && (
             <OverviewView
               cases={cases}
+              overview={metrics.overview}
+              upcoming={metrics.upcoming}
+              upcomingCases={metrics.upcomingCases}
+              metricsError={metrics.error}
+              onRetryMetrics={() => void metrics.reload()}
               onSelectCase={(c) => setSelectedCaseId(c.id)}
               onNavigate={(tab) => setActiveTab(tab)}
             />
