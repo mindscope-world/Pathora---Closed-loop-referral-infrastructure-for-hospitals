@@ -1,0 +1,6 @@
+{
+  "name": "Pathora",
+  "description": "Closed-loop referral management and accountability infrastructure for screening and preventive healthcare programmes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
