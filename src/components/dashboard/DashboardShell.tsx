@@ -8,19 +8,31 @@ import {
   GitBranch,
   FileCheck2,
   Settings,
-  ArrowLeft,
+  LogOut,
   Plus,
   Upload,
   Menu,
   X,
-  CheckCircle2,
-  Clock,
   Search,
 } from 'lucide-react';
 import { PathoraMark } from '../PathoraMark';
 import { AuthUserSession } from '../auth/LoginPage';
-import { INITIAL_FACILITIES, PathwayName } from '../../data/dashboardData';
+import { INITIAL_FACILITIES, PathwayName, ReferralCase } from '../../data/dashboardData';
 import { api, Workspace } from '../../lib/api';
+import {
+  Alert,
+  Badge,
+  Button,
+  Field,
+  Input,
+  Modal,
+  Select,
+  StatusBadge,
+  Textarea,
+  cn,
+  controlClass,
+  useEscape,
+} from '../ui';
 import { OverviewView } from './OverviewView';
 import { CasesView } from './CasesView';
 import { FacilitiesView } from './FacilitiesView';
@@ -28,7 +40,6 @@ import { EscalationsView } from './EscalationsView';
 import { CommsConsentView } from './CommsConsentView';
 import { PathwaysView } from './PathwaysView';
 import { AuditView, SettingsView } from './AuditSettingsViews';
-import { ReferralProgressTracker, deriveReferralJourney } from './ReferralProgressTracker';
 
 export type DashboardTab =
   | 'overview'
@@ -233,313 +244,249 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   const overdueCount = cases.filter((c) => c.status === 'Overdue SLA').length;
   const awaitingAckCount = cases.filter((c) => c.status === 'Awaiting Ack').length;
 
-  const NAV_ITEMS: Array<{
-    id: DashboardTab;
+  const NAV_GROUPS: Array<{
     label: string;
-    icon: typeof LayoutDashboard;
-    count?: number;
+    items: Array<{ id: DashboardTab; label: string; icon: typeof LayoutDashboard; count?: number; urgent?: boolean }>;
   }> = [
-    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-    { id: 'cases', label: 'Referrals & Cases', icon: ClipboardList, count: cases.length },
-    { id: 'facilities', label: 'Facility Desk', icon: Building2, count: awaitingAckCount },
-    { id: 'escalations', label: 'SLA Escalations', icon: AlertTriangle, count: overdueCount },
-    { id: 'comms', label: 'Patient Comms', icon: MessageSquare },
-    { id: 'pathways', label: 'Pathway Rules', icon: GitBranch },
-    { id: 'audit', label: 'Audit & Exports', icon: FileCheck2 },
-    { id: 'settings', label: 'Team & Settings', icon: Settings },
+    {
+      label: 'Workspace',
+      items: [
+        { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+        { id: 'cases', label: 'Referrals', icon: ClipboardList, count: cases.length },
+        { id: 'facilities', label: 'Facility desk', icon: Building2, count: awaitingAckCount },
+        { id: 'escalations', label: 'Escalations', icon: AlertTriangle, count: overdueCount, urgent: true },
+      ],
+    },
+    {
+      label: 'Operations',
+      items: [
+        { id: 'comms', label: 'Patient comms', icon: MessageSquare },
+        { id: 'pathways', label: 'Pathway rules', icon: GitBranch },
+      ],
+    },
+    {
+      label: 'Governance',
+      items: [
+        { id: 'audit', label: 'Audit & exports', icon: FileCheck2 },
+        { id: 'settings', label: 'Team & settings', icon: Settings },
+      ],
+    },
   ];
 
-  const activeLabel = NAV_ITEMS.find((n) => n.id === activeTab)?.label ?? 'Overview';
+  const activeLabel =
+    NAV_GROUPS.flatMap((g) => g.items).find((n) => n.id === activeTab)?.label ?? 'Overview';
+
+  const userName = currentUser?.name || 'Workspace user';
+  const initials = userName
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase())
+    .join('');
 
   const SidebarContent = (
-    <div className="flex flex-col h-full justify-between bg-[#061B3A] text-white w-64 p-4">
-      <div className="space-y-6">
-        <div className="px-2 pt-1 flex items-center justify-between">
-          <PathoraMark variant="dark" />
-          <button
-            type="button"
-            onClick={() => setMobileNavOpen(false)}
-            className="lg:hidden text-slate-300 hover:text-white p-1"
-            aria-label="Close sidebar"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <nav aria-label="Dashboard navigation" className="space-y-1">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const isActive = item.id === activeTab;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => {
-                  setActiveTab(item.id);
-                  setMobileNavOpen(false);
-                }}
-                className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium rounded-xl transition-colors cursor-pointer ${
-                  isActive
-                    ? 'bg-[#008E97] text-white'
-                    : 'text-slate-300 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <span className="inline-flex items-center gap-2.5 truncate">
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
-                </span>
-                {typeof item.count === 'number' && item.count > 0 && (
-                  <span
-                    className={`font-mono text-[11px] tabular-nums ${
-                      isActive ? 'text-teal-50' : 'text-slate-400'
-                    }`}
-                  >
-                    {item.count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
+    <div className="flex flex-col h-full w-60 bg-surface border-r border-line">
+      <div className="h-14 px-4 flex items-center justify-between border-b border-line">
+        <PathoraMark variant="light" />
+        <button
+          type="button"
+          onClick={() => setMobileNavOpen(false)}
+          className="lg:hidden p-1.5 rounded-md text-ink-3 hover:text-ink hover:bg-subtle"
+          aria-label="Close navigation"
+        >
+          <X className="size-4" />
+        </button>
       </div>
 
-      <div className="pt-4 border-t border-white/15 space-y-3">
-        <div className="px-2 text-xs text-slate-300">
-          <p className="font-semibold text-white truncate">
-            {currentUser?.name || 'Miriam Wanjiku'}
-          </p>
-          <p className="text-[11px] text-slate-400 truncate">
-            {currentUser?.role || 'Programme Coordinator'}
-          </p>
-        </div>
+      <nav aria-label="Dashboard" className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label}>
+            <p className="px-2 mb-1 text-[11px] font-medium uppercase tracking-wider text-ink-3">{group.label}</p>
+            <div className="space-y-0.5">
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const isActive = item.id === activeTab;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setMobileNavOpen(false);
+                    }}
+                    className={cn(
+                      'w-full h-8 px-2 flex items-center gap-2.5 rounded-md text-sm transition-colors cursor-pointer',
+                      isActive ? 'bg-brand-soft text-brand-ink font-medium' : 'text-ink-2 hover:bg-subtle hover:text-ink'
+                    )}
+                  >
+                    <Icon className={cn('size-4 shrink-0', isActive ? 'text-brand' : 'text-ink-3')} />
+                    <span className="flex-1 text-left truncate">{item.label}</span>
+                    {typeof item.count === 'number' && item.count > 0 && (
+                      <span
+                        className={cn(
+                          'min-w-5 h-5 px-1.5 rounded-full text-[11px] font-medium tabular-nums flex items-center justify-center',
+                          item.urgent ? 'bg-danger-soft text-danger' : 'bg-subtle text-ink-2'
+                        )}
+                      >
+                        {item.count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </nav>
 
+      <div className="p-3 border-t border-line flex items-center gap-2.5">
+        <span className="size-8 shrink-0 rounded-full bg-brand-soft text-brand-ink text-xs font-semibold flex items-center justify-center">
+          {initials || 'P'}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-medium text-ink truncate">{userName}</p>
+          <p className="text-xs text-ink-3 truncate">{currentUser?.role || 'Programme Coordinator'}</p>
+        </div>
         <button
           type="button"
           onClick={onExitDashboard}
-          className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-teal-100 bg-white/10 hover:bg-white/15 rounded-xl transition-colors cursor-pointer"
+          title="Sign out"
+          aria-label="Sign out"
+          className="p-1.5 rounded-md text-ink-3 hover:text-ink hover:bg-subtle cursor-pointer"
         >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Sign Out</span>
+          <LogOut className="size-4" />
         </button>
       </div>
     </div>
   );
 
-  return (
-    <div className="min-h-screen flex bg-[#F8FAFC] text-[#061B3A]">
-      {/* Desktop Fixed Sidebar (256px) */}
-      <aside className="hidden lg:block shrink-0 sticky top-0 h-screen">
-        {SidebarContent}
-      </aside>
+  const trimmedQuery = globalQuery.trim().toLowerCase();
+  const searchMatches = trimmedQuery
+    ? cases.filter(
+        (c) =>
+          c.patientName.toLowerCase().includes(trimmedQuery) ||
+          c.id.toLowerCase().includes(trimmedQuery) ||
+          c.patientCode.toLowerCase().includes(trimmedQuery)
+      )
+    : [];
 
-      {/* Mobile Sidebar Overlay */}
+  return (
+    <div className="min-h-screen flex bg-canvas text-ink">
+      <aside className="hidden lg:block shrink-0 sticky top-0 h-screen">{SidebarContent}</aside>
+
       {mobileNavOpen && (
-        <div
-          className="fixed inset-0 z-50 lg:hidden flex bg-[#061B3A]/60 backdrop-blur-sm"
-          onClick={() => setMobileNavOpen(false)}
-        >
+        <div className="fixed inset-0 z-50 lg:hidden flex bg-ink/40" onClick={() => setMobileNavOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} className="h-full">
             {SidebarContent}
           </div>
         </div>
       )}
 
-      {/* Main Content Area */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Top Bar Contract: Breadcrumb on Left, Global Referral Search + Action Buttons on Right */}
-        <header className="sticky top-0 z-30 h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-3 sm:gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <button
-              type="button"
-              onClick={() => setMobileNavOpen(true)}
-              className="lg:hidden p-2 rounded-lg border border-slate-200 text-[#061B3A] hover:bg-slate-50 cursor-pointer"
-              aria-label="Open navigation menu"
-            >
-              <Menu className="w-4 h-4" />
-            </button>
+        <header className="sticky top-0 z-30 h-14 bg-surface/95 backdrop-blur border-b border-line px-4 sm:px-6 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="lg:hidden p-1.5 -ml-1.5 rounded-md text-ink-2 hover:bg-subtle cursor-pointer"
+            aria-label="Open navigation"
+          >
+            <Menu className="size-5" />
+          </button>
 
-            <div className="flex items-center gap-2 text-sm truncate">
-              <span className="text-slate-500 hidden xl:inline">Pathora Workspace</span>
-              <span className="text-slate-300 hidden xl:inline">/</span>
-              <h1 className="font-display font-bold text-[#061B3A] truncate">
-                {activeLabel}
-              </h1>
-            </div>
-          </div>
+          <h1 className="text-[15px] font-semibold text-ink truncate">{activeLabel}</h1>
 
-          {/* Global Referral Lookup Search Bar */}
-          {(() => {
-            const trimmed = globalQuery.trim().toLowerCase();
-            const searchMatches = trimmed
-              ? cases.filter(
-                  (c) =>
-                    c.patientName.toLowerCase().includes(trimmed) ||
-                    c.id.toLowerCase().includes(trimmed) ||
-                    c.patientCode.toLowerCase().includes(trimmed)
-                )
-              : [];
+          <div className="relative ml-auto w-full max-w-xs">
+            <Search className="size-4 text-ink-3 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="search"
+              value={globalQuery}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setTimeout(() => setSearchFocused(false), 160)}
+              onChange={(e) => {
+                setGlobalQuery(e.target.value);
+                setSearchFocused(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setGlobalQuery('');
+                  setSearchFocused(false);
+                } else if (e.key === 'Enter' && searchMatches.length > 0) {
+                  e.preventDefault();
+                  setSelectedCaseId(searchMatches[0].id);
+                  setGlobalQuery('');
+                  setSearchFocused(false);
+                }
+              }}
+              placeholder="Find patient or referral ID"
+              aria-label="Find a referral by patient name or ID"
+              className={cn(controlClass, 'h-8 pl-8 bg-canvas')}
+            />
 
-            return (
-              <div className="relative flex-1 max-w-sm md:max-w-md">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  value={globalQuery}
-                  onFocus={() => setSearchFocused(true)}
-                  onBlur={() => setTimeout(() => setSearchFocused(false), 160)}
-                  onChange={(e) => {
-                    setGlobalQuery(e.target.value);
-                    setSearchFocused(true);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      setGlobalQuery('');
-                      setSearchFocused(false);
-                    } else if (e.key === 'Enter' && searchMatches.length > 0) {
-                      e.preventDefault();
-                      setSelectedCaseId(searchMatches[0].id);
-                      setGlobalQuery('');
-                      setSearchFocused(false);
-                    }
-                  }}
-                  placeholder="Lookup referral by patient name or ID..."
-                  aria-label="Lookup referral by patient name or ID"
-                  className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm bg-[#F8FAFC] border border-slate-200 rounded-lg text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6] focus:bg-white transition-colors"
-                />
-                {globalQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setGlobalQuery('')}
-                    aria-label="Clear referral search"
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#061B3A] cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-
-                {searchFocused && trimmed.length > 0 && (
-                  <div className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-50">
-                    {searchMatches.length === 0 ? (
-                      <div className="px-4 py-3 text-xs text-slate-500 flex items-center justify-between gap-2">
-                        <span>No referrals match &ldquo;{globalQuery}&rdquo;</span>
+            {searchFocused && trimmedQuery.length > 0 && (
+              <div className="absolute right-0 left-0 sm:left-auto sm:w-96 mt-1.5 bg-surface border border-line rounded-lg shadow-overlay overflow-hidden z-50">
+                {searchMatches.length === 0 ? (
+                  <p className="px-4 py-3 text-[13px] text-ink-3">No referrals match “{globalQuery}”.</p>
+                ) : (
+                  <ul className="max-h-80 overflow-y-auto py-1">
+                    {searchMatches.map((match) => (
+                      <li key={match.id}>
                         <button
                           type="button"
                           onMouseDown={(e) => {
                             e.preventDefault();
+                            setSelectedCaseId(match.id);
                             setGlobalQuery('');
+                            setSearchFocused(false);
                           }}
-                          className="font-semibold text-[#00828C] cursor-pointer"
+                          className="w-full text-left px-3.5 py-2 hover:bg-subtle flex items-center justify-between gap-3 cursor-pointer"
                         >
-                          Clear
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium text-ink truncate">{match.patientName}</span>
+                            <span className="block text-xs text-ink-3 truncate">
+                              <span className="font-mono">{match.id}</span> · {match.pathway}
+                            </span>
+                          </span>
+                          <StatusBadge status={match.status} />
                         </button>
-                      </div>
-                    ) : (
-                      <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
-                        <div className="px-3.5 py-2 bg-slate-50 text-[11px] font-semibold text-slate-500 flex items-center justify-between">
-                          <span>Matching Referrals</span>
-                          <span className="font-mono tabular-nums">{searchMatches.length}</span>
-                        </div>
-                        {searchMatches.map((match) => {
-                          const journey = deriveReferralJourney(match);
-                          return (
-                            <button
-                              key={match.id}
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setSelectedCaseId(match.id);
-                                setGlobalQuery('');
-                                setSearchFocused(false);
-                              }}
-                              className="w-full text-left px-3.5 py-2.5 hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 cursor-pointer"
-                            >
-                              <div className="min-w-0">
-                                <p className="text-xs font-bold text-[#061B3A] truncate">
-                                  {match.patientName}{' '}
-                                  <span className="font-mono font-normal text-slate-500">
-                                    ({match.patientCode})
-                                  </span>
-                                </p>
-                                <p className="text-[11px] text-slate-500 truncate">
-                                  <span className="font-mono text-[#00828C] font-medium">
-                                    {match.id}
-                                  </span>{' '}
-                                  · {match.pathway}
-                                </p>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <span className="block text-[11px] font-semibold text-[#061B3A]">
-                                  {journey.currentStageLabel}
-                                </span>
-                                <span className="font-mono text-[10px] tabular-nums text-slate-500">
-                                  {journey.completedCount}/4 steps
-                                </span>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
-            );
-          })()}
+            )}
+          </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => setCsvModalOpen(true)}
-              className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#061B3A] bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Import CSV</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setNewCaseModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Log Positive Screen</span>
-              <span className="sm:hidden">Log Screen</span>
-            </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="secondary" size="sm" className="hidden md:inline-flex" onClick={() => setCsvModalOpen(true)}>
+              <Upload />
+              Import CSV
+            </Button>
+            <Button size="sm" onClick={() => setNewCaseModalOpen(true)}>
+              <Plus />
+              <span className="hidden sm:inline">Log positive screen</span>
+              <span className="sm:hidden">New</span>
+            </Button>
           </div>
         </header>
 
-        {/* Active Page Viewport */}
-        <main className="flex-1 p-4 sm:p-6 max-w-[1320px] w-full mx-auto">
+        <main className="flex-1 px-4 sm:px-6 py-6 max-w-[1280px] w-full mx-auto">
           {actionError && (
-            <div
-              role="alert"
-              className="mb-4 flex items-start justify-between gap-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3"
-            >
-              <span>{actionError}</span>
-              <button
-                type="button"
-                onClick={() => setActionError(null)}
-                aria-label="Dismiss error"
-                className="text-red-500 hover:text-red-800 cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+            <div className="mb-4">
+              <Alert onDismiss={() => setActionError(null)}>{actionError}</Alert>
             </div>
           )}
           {!workspace && (
-            <div className="py-24 text-center text-sm text-slate-500 space-y-3">
+            <div className="py-24 text-center space-y-3">
               {loadError ? (
                 <>
-                  <p className="text-red-700">{loadError}</p>
-                  <button
-                    type="button"
-                    onClick={loadWorkspace}
-                    className="px-4 py-2 text-xs font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-lg cursor-pointer"
-                  >
+                  <p className="text-sm text-danger">{loadError}</p>
+                  <Button variant="secondary" size="sm" onClick={loadWorkspace}>
                     Try again
-                  </button>
+                  </Button>
                 </>
               ) : (
-                <p>Loading workspace…</p>
+                <p className="text-sm text-ink-3">Loading workspace…</p>
               )}
             </div>
           )}
@@ -584,10 +531,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
             />
           )}
           {workspace && activeTab === 'pathways' && (
-            <PathwaysView
-              rulePacks={rulePacks}
-              onUpdateRulePackSla={handleUpdateRulePackSla}
-            />
+            <PathwaysView rulePacks={rulePacks} onUpdateRulePackSla={handleUpdateRulePackSla} />
           )}
           {workspace && activeTab === 'audit' && (
             <AuditView
@@ -612,428 +556,309 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
         </main>
       </div>
 
-      {/* Case Detail Slide-Over Drawer */}
       {selectedCase && (
-        <div
-          className="fixed inset-0 z-50 flex justify-end bg-[#061B3A]/50 backdrop-blur-sm"
-          onClick={() => setSelectedCaseId(null)}
-        >
-          <div
-            className="w-full max-w-lg bg-white h-full overflow-y-auto p-6 shadow-2xl border-l border-slate-200 flex flex-col justify-between space-y-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="space-y-5">
-              <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
-                <div>
-                  <span className="font-mono text-xs font-bold text-[#00828C]">
-                    {selectedCase.id} · {selectedCase.patientCode}
-                  </span>
-                  <h2 className="font-display text-lg font-bold text-[#061B3A] mt-0.5">
-                    {selectedCase.patientName} — {selectedCase.pathway}
-                  </h2>
-                  <p className="text-xs text-slate-500">{selectedCase.sourceProgram}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedCaseId(null)}
-                  className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-[#061B3A] cursor-pointer"
-                  aria-label="Close case details"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Visual 4-Stage Progress Tracker */}
-              <ReferralProgressTracker referral={selectedCase} variant="full" />
-
-              {/* Distinct Closed-Loop Milestones */}
-              <div className="space-y-2.5">
-                <h3 className="text-xs font-semibold text-slate-500">
-                  Audit Event Timestamps
-                </h3>
-                <div className="bg-[#F8FAFC] border border-slate-200 rounded-xl p-4 space-y-2.5 text-xs">
-                  {[
-                    { label: '1. Referral Issued', ts: selectedCase.milestones.referralIssuedAt },
-                    {
-                      label: '2. Facility Acknowledged (Appointment Scheduled)',
-                      ts: selectedCase.milestones.facilityAcknowledgedAt,
-                    },
-                    { label: '3. Patient Attended', ts: selectedCase.milestones.patientAttendedAt },
-                    {
-                      label: '4. Evaluation Completed',
-                      ts: selectedCase.milestones.evaluationCompletedAt,
-                    },
-                    {
-                      label: '5. Care Completed (Outcome Documented)',
-                      ts: selectedCase.milestones.outcomeDocumentedAt,
-                    },
-                  ].map((m) => (
-                    <div key={m.label} className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-2 font-medium text-[#061B3A]">
-                        {m.ts ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        ) : (
-                          <Clock className="w-3.5 h-3.5 text-slate-400" />
-                        )}
-                        {m.label}
-                      </span>
-                      <span className="font-mono tabular-nums text-slate-500">
-                        {m.ts ?? 'Pending'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Ownership & Facility Details */}
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="border border-slate-200 rounded-xl p-3">
-                  <label htmlFor="reassign-owner" className="block text-slate-500 mb-1">
-                    Named Owner
-                  </label>
-                  <select
-                    id="reassign-owner"
-                    value={selectedCase.coordinator}
-                    onChange={(e) => handleReassignOwner(selectedCase.id, e.target.value)}
-                    className="w-full font-semibold text-[#061B3A] bg-transparent focus:outline-none"
-                  >
-                    <option value="Miriam Wanjiku">Miriam Wanjiku</option>
-                    <option value="Peter Omondi">Peter Omondi</option>
-                    <option value="Amina Salim">Amina Salim</option>
-                  </select>
-                </div>
-                <div className="border border-slate-200 rounded-xl p-3">
-                  <span className="block text-slate-500 mb-1">Receiving Facility</span>
-                  <span className="font-semibold text-[#061B3A] block truncate">
-                    {selectedCase.receivingFacility}
-                  </span>
-                </div>
-              </div>
-
-              <div className="border border-slate-200 rounded-xl p-3.5 text-xs space-y-1">
-                <span className="font-semibold text-slate-500">Operational Notes</span>
-                <p className="text-slate-700 leading-relaxed">{selectedCase.notes}</p>
-              </div>
-
-              {/* Stage Quick Actions or Verified Closure Form */}
-              {selectedCase.status === 'Closed Verified' ? (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs space-y-1">
-                  <p className="font-bold text-emerald-800">Verified Terminal Outcome Recorded</p>
-                  <p className="text-emerald-900">{selectedCase.closureReason}</p>
-                  <p className="text-emerald-700">Source: {selectedCase.outcomeSource}</p>
-                </div>
-              ) : (
-                <div className="space-y-4 pt-2 border-t border-slate-100">
-                  <div className="flex flex-wrap gap-2">
-                    {!selectedCase.milestones.facilityAcknowledgedAt && (
-                      <button
-                        type="button"
-                        onClick={() => handleAcknowledgeCase(selectedCase.id)}
-                        className="px-3.5 py-2 text-xs font-semibold text-white bg-[#008E97] rounded-lg cursor-pointer"
-                      >
-                        Record Facility Ack
-                      </button>
-                    )}
-                    {!selectedCase.milestones.patientAttendedAt && (
-                      <button
-                        type="button"
-                        onClick={() => handleConfirmAttendance(selectedCase.id)}
-                        className="px-3.5 py-2 text-xs font-semibold text-white bg-[#061B3A] rounded-lg cursor-pointer"
-                      >
-                        Confirm Patient Attendance
-                      </button>
-                    )}
-                  </div>
-
-                  <form
-                    onSubmit={handleDocumentClosure}
-                    className="bg-[#F8FAFC] border border-slate-200 rounded-xl p-4 space-y-3"
-                  >
-                    <h4 className="text-xs font-bold text-[#061B3A]">
-                      Document Verified Outcome &amp; Close Case
-                    </h4>
-                    <div>
-                      <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                        Terminal Closure Reason
-                      </label>
-                      <select
-                        value={closureReasonInput}
-                        onChange={(e) => setClosureReasonInput(e.target.value)}
-                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
-                      >
-                        <option value="Clinical evaluation completed & care plan documented">
-                          Clinical evaluation completed &amp; care plan documented
-                        </option>
-                        <option value="Confirmatory diagnostic negative · Returned to routine screening">
-                          Confirmatory diagnostic negative · Returned to routine screening
-                        </option>
-                        <option value="Patient declined further care (documented consent)">
-                          Patient declined further care (documented consent)
-                        </option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                        Authorized Outcome Source (Clinician / Facility Desk)
-                      </label>
-                      <input
-                        type="text"
-                        value={outcomeSourceInput}
-                        onChange={(e) => setOutcomeSourceInput(e.target.value)}
-                        placeholder={`e.g. Focal Clinician at ${selectedCase.receivingFacility}`}
-                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      className="w-full py-2.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors cursor-pointer"
-                    >
-                      Verify Outcome &amp; Close Case
-                    </button>
-                  </form>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <CaseDrawer
+          referral={selectedCase}
+          onClose={() => setSelectedCaseId(null)}
+          onReassign={(owner) => handleReassignOwner(selectedCase.id, owner)}
+          onAcknowledge={() => handleAcknowledgeCase(selectedCase.id)}
+          onConfirmAttendance={() => handleConfirmAttendance(selectedCase.id)}
+          closureReason={closureReasonInput}
+          onClosureReasonChange={setClosureReasonInput}
+          outcomeSource={outcomeSourceInput}
+          onOutcomeSourceChange={setOutcomeSourceInput}
+          onSubmitClosure={handleDocumentClosure}
+        />
       )}
 
-      {/* Log Positive Screen Modal */}
       {newCaseModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#061B3A]/60 backdrop-blur-sm"
-          onClick={() => setNewCaseModalOpen(false)}
+        <Modal
+          title="Log positive screen"
+          description="Creates a tracked referral and notifies the receiving facility."
+          onClose={() => setNewCaseModalOpen(false)}
+          size="lg"
         >
-          <div
-            className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h2 className="font-display text-lg font-bold text-[#061B3A]">
-                Log Positive Screen / New Referral
-              </h2>
-              <button
-                type="button"
-                onClick={() => setNewCaseModalOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-[#061B3A] cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          <form onSubmit={handleCreateNewCase} className="space-y-4">
+            {newCaseError && <Alert>{newCaseError}</Alert>}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Field label="Patient name" htmlFor="nc-name">
+                <Input id="nc-name" value={newPatientName} onChange={(e) => setNewPatientName(e.target.value)} placeholder="Grace Mutua" />
+              </Field>
+              <Field label="Identifier code" htmlFor="nc-code">
+                <Input id="nc-code" value={newPatientCode} onChange={(e) => setNewPatientCode(e.target.value)} placeholder="Auto if blank" className="font-mono" />
+              </Field>
+              <Field label="Cohort note" htmlFor="nc-label">
+                <Input id="nc-label" value={newPatientLabel} onChange={(e) => setNewPatientLabel(e.target.value)} placeholder="NBO · F / 41" />
+              </Field>
             </div>
 
-            {newCaseError && (
-              <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
-                {newCaseError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreateNewCase} className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-semibold text-[#061B3A] mb-1">
-                    Patient Name
-                  </label>
-                  <input
-                    type="text"
-                    value={newPatientName}
-                    onChange={(e) => setNewPatientName(e.target.value)}
-                    placeholder="Grace Mutua"
-                    className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-[#061B3A] mb-1">
-                    Identifier Code
-                  </label>
-                  <input
-                    type="text"
-                    value={newPatientCode}
-                    onChange={(e) => setNewPatientCode(e.target.value)}
-                    placeholder="PT-8860"
-                    className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-[#061B3A] mb-1">
-                    Cohort Note
-                  </label>
-                  <input
-                    type="text"
-                    value={newPatientLabel}
-                    onChange={(e) => setNewPatientLabel(e.target.value)}
-                    placeholder="Cohort NBO · F / 41"
-                    className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-[#061B3A] mb-1">Pathway</label>
-                  <select
-                    value={newPathway}
-                    onChange={(e) => setNewPathway(e.target.value as PathwayName)}
-                    className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg"
-                  >
-                    <option value="Cancer Screening">Cancer Screening</option>
-                    <option value="NCD Screening">NCD Screening</option>
-                    <option value="Male Reproductive Health">Male Reproductive Health</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-semibold text-[#061B3A] mb-1">Named Owner</label>
-                  <select
-                    value={newCoordinator}
-                    onChange={(e) => setNewCoordinator(e.target.value)}
-                    className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg"
-                  >
-                    <option value="Miriam Wanjiku">Miriam Wanjiku</option>
-                    <option value="Peter Omondi">Peter Omondi</option>
-                    <option value="Amina Salim">Amina Salim</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-[#061B3A] mb-1">
-                  Screening Source Programme
-                </label>
-                <input
-                  type="text"
-                  value={newSourceProgram}
-                  onChange={(e) => setNewSourceProgram(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-[#061B3A] mb-1">
-                  Receiving Facility
-                </label>
-                <select
-                  value={newFacility}
-                  onChange={(e) => setNewFacility(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg"
-                >
-                  {facilities.map((f) => (
-                    <option key={f.id} value={f.name}>
-                      {f.name} ({f.city})
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Pathway" htmlFor="nc-pathway">
+                <Select id="nc-pathway" value={newPathway} onChange={(e) => setNewPathway(e.target.value as PathwayName)}>
+                  <option value="Cancer Screening">Cancer Screening</option>
+                  <option value="NCD Screening">NCD Screening</option>
+                  <option value="Male Reproductive Health">Male Reproductive Health</option>
+                </Select>
+              </Field>
+              <Field label="Named owner" htmlFor="nc-owner">
+                <Select id="nc-owner" value={newCoordinator} onChange={(e) => setNewCoordinator(e.target.value)}>
+                  {COORDINATORS.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
                     </option>
                   ))}
-                </select>
-              </div>
-
-              <div className="flex items-center justify-between pt-1">
-                <label className="inline-flex items-center gap-2 text-slate-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newConsentSms}
-                    onChange={(e) => setNewConsentSms(e.target.checked)}
-                    className="rounded border-slate-300"
-                  />
-                  <span>Patient SMS follow-up consent recorded</span>
-                </label>
-
-                <label className="inline-flex items-center gap-2 text-red-700 font-semibold cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newRedFlag}
-                    onChange={(e) => setNewRedFlag(e.target.checked)}
-                    className="rounded border-slate-300"
-                  />
-                  <span>Clinical Red Flag</span>
-                </label>
-              </div>
-
-              <div className="pt-3 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setNewCaseModalOpen(false)}
-                  className="px-4 py-2 text-slate-600 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={newCaseSubmitting}
-                  className="px-5 py-2 font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 disabled:cursor-wait rounded-lg cursor-pointer"
-                >
-                  {newCaseSubmitting ? 'Creating…' : 'Create Tracked Case'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Secure CSV Import Modal */}
-      {csvModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#061B3A]/60 backdrop-blur-sm"
-          onClick={() => setCsvModalOpen(false)}
-        >
-          <div
-            className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h2 className="font-display text-lg font-bold text-[#061B3A]">
-                  Phase 1 Secure CSV Batch Intake
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Format: PatientCode, CohortLabel, Pathway, SourceProgram, Owner, Facility
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCsvModalOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-[#061B3A] cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+                </Select>
+              </Field>
+              <Field label="Screening programme" htmlFor="nc-source">
+                <Input id="nc-source" value={newSourceProgram} onChange={(e) => setNewSourceProgram(e.target.value)} />
+              </Field>
+              <Field label="Receiving facility" htmlFor="nc-facility">
+                <Select id="nc-facility" value={newFacility} onChange={(e) => setNewFacility(e.target.value)}>
+                  {facilities.map((f) => (
+                    <option key={f.id} value={f.name}>
+                      {f.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
             </div>
 
-            <form onSubmit={handleCsvImport} className="space-y-4">
-              <textarea
-                rows={5}
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-                className="w-full p-3 font-mono text-xs bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A]"
-              />
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-ink-2">
+              <label className="inline-flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={newConsentSms} onChange={(e) => setNewConsentSms(e.target.checked)} className="size-4 accent-brand" />
+                SMS follow-up consent recorded
+              </label>
+              <label className="inline-flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={newRedFlag} onChange={(e) => setNewRedFlag(e.target.checked)} className="size-4 accent-danger" />
+                Clinical red flag
+              </label>
+            </div>
 
-              {csvFeedback && (
-                <div
-                  role={csvFeedbackIsError ? 'alert' : 'status'}
-                  className={`text-xs rounded-lg p-3 border ${
-                    csvFeedbackIsError
-                      ? 'text-red-700 bg-red-50 border-red-200'
-                      : 'text-emerald-800 bg-emerald-50 border-emerald-200'
-                  }`}
-                >
-                  {csvFeedback}
+            <div className="flex justify-end gap-2 pt-2 border-t border-line -mx-6 px-6 -mb-5 pb-5 mt-5 pt-4">
+              <Button variant="secondary" onClick={() => setNewCaseModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={newCaseSubmitting}>
+                {newCaseSubmitting ? 'Creating…' : 'Create referral'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {csvModalOpen && (
+        <Modal
+          title="Import referrals from CSV"
+          description="One referral per line: patient code, cohort, pathway, source programme, owner, facility."
+          onClose={() => setCsvModalOpen(false)}
+        >
+          <form onSubmit={handleCsvImport} className="space-y-4">
+            <Textarea
+              rows={6}
+              value={csvText}
+              onChange={(e) => setCsvText(e.target.value)}
+              className="font-mono text-xs leading-5"
+              aria-label="CSV rows"
+            />
+            {csvFeedback && <Alert tone={csvFeedbackIsError ? 'danger' : 'success'}>{csvFeedback}</Alert>}
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setCsvModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">Import referrals</Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+const COORDINATORS = ['Miriam Wanjiku', 'Peter Omondi', 'Amina Salim'];
+
+const CLOSURE_REASONS = [
+  'Clinical evaluation completed & care plan documented',
+  'Confirmatory diagnostic negative · Returned to routine screening',
+  'Patient declined further care (documented consent)',
+];
+
+interface CaseDrawerProps {
+  referral: ReferralCase;
+  onClose: () => void;
+  onReassign: (owner: string) => void;
+  onAcknowledge: () => void;
+  onConfirmAttendance: () => void;
+  closureReason: string;
+  onClosureReasonChange: (v: string) => void;
+  outcomeSource: string;
+  onOutcomeSourceChange: (v: string) => void;
+  onSubmitClosure: (e: FormEvent) => void;
+}
+
+function CaseDrawer({
+  referral,
+  onClose,
+  onReassign,
+  onAcknowledge,
+  onConfirmAttendance,
+  closureReason,
+  onClosureReasonChange,
+  outcomeSource,
+  onOutcomeSourceChange,
+  onSubmitClosure,
+}: CaseDrawerProps) {
+  useEscape(onClose);
+  const m = referral.milestones;
+  const timeline = [
+    { label: 'Referral issued', ts: m.referralIssuedAt },
+    { label: 'Facility acknowledged', ts: m.facilityAcknowledgedAt },
+    { label: 'Patient attended', ts: m.patientAttendedAt },
+    { label: 'Evaluation completed', ts: m.evaluationCompletedAt },
+    { label: 'Outcome documented', ts: m.outcomeDocumentedAt },
+  ];
+  const isClosed = referral.status === 'Closed Verified';
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-ink/30" onClick={onClose} role="presentation">
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="case-drawer-title"
+        className="w-full max-w-[520px] h-full bg-surface border-l border-line shadow-overlay flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-line flex items-start justify-between gap-4">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs text-ink-3">{referral.id}</span>
+              <StatusBadge status={referral.status} />
+              {referral.redFlag && <Badge tone="danger">Red flag</Badge>}
+            </div>
+            <h2 id="case-drawer-title" className="text-lg font-semibold text-ink">
+              {referral.patientName}
+            </h2>
+            <p className="text-[13px] text-ink-3">
+              {referral.pathway} · {referral.patientLabel} · <span className="font-mono">{referral.patientCode}</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close case details"
+            className="-mr-1.5 p-1.5 rounded-md text-ink-3 hover:text-ink hover:bg-subtle cursor-pointer"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+          <section className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm">
+            <Field label="Named owner" htmlFor="drawer-owner">
+              <Select id="drawer-owner" value={referral.coordinator} onChange={(e) => onReassign(e.target.value)}>
+                {[...new Set([referral.coordinator, ...COORDINATORS])].map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <div className="space-y-1.5">
+              <p className="text-[13px] font-medium text-ink">Receiving facility</p>
+              <p className="text-ink-2 leading-9 truncate" title={referral.receivingFacility}>
+                {referral.receivingFacility}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[13px] font-medium text-ink">Source programme</p>
+              <p className="text-ink-2">{referral.sourceProgram}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[13px] font-medium text-ink">Follow-up consent</p>
+              <p className="text-ink-2">
+                {referral.optedOut
+                  ? 'Opted out — human contact only'
+                  : [referral.consentSms && 'SMS', referral.consentWhatsApp && 'WhatsApp'].filter(Boolean).join(', ') || 'None recorded'}
+              </p>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-[13px] font-medium text-ink">Timeline</h3>
+            <ol className="relative border-l border-line ml-1.5 space-y-3">
+              {timeline.map((t) => (
+                <li key={t.label} className="pl-4 relative">
+                  <span
+                    className={cn(
+                      'absolute -left-[5px] top-1.5 size-2.5 rounded-full border-2 border-surface',
+                      t.ts ? 'bg-brand' : 'bg-line-strong'
+                    )}
+                    aria-hidden="true"
+                  />
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className={t.ts ? 'text-ink' : 'text-ink-3'}>{t.label}</span>
+                    <span className="text-xs tabular-nums text-ink-3">{t.ts ?? 'Pending'}</span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+
+          <section className="space-y-1.5">
+            <h3 className="text-[13px] font-medium text-ink">Notes</h3>
+            <p className="text-sm text-ink-2 leading-relaxed">{referral.notes}</p>
+          </section>
+
+          {isClosed ? (
+            <section className="rounded-lg border border-success-line bg-success-soft px-4 py-3 text-sm space-y-0.5">
+              <p className="font-medium text-success">Verified outcome recorded</p>
+              <p className="text-ink">{referral.closureReason}</p>
+              <p className="text-ink-2 text-[13px]">Source: {referral.outcomeSource}</p>
+            </section>
+          ) : (
+            <section className="space-y-4 pt-5 border-t border-line">
+              {(!m.facilityAcknowledgedAt || !m.patientAttendedAt) && (
+                <div className="flex flex-wrap gap-2">
+                  {!m.facilityAcknowledgedAt && (
+                    <Button variant="secondary" size="sm" onClick={onAcknowledge}>
+                      Record facility acknowledgment
+                    </Button>
+                  )}
+                  {!m.patientAttendedAt && (
+                    <Button variant="secondary" size="sm" onClick={onConfirmAttendance}>
+                      Confirm attendance
+                    </Button>
+                  )}
                 </div>
               )}
 
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCsvModalOpen(false)}
-                  className="px-4 py-2 text-xs text-slate-600 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-semibold text-white bg-[#061B3A] hover:bg-[#0B2954] rounded-lg cursor-pointer"
-                >
-                  Import Batch Referrals
-                </button>
-              </div>
-            </form>
-          </div>
+              <form onSubmit={onSubmitClosure} className="space-y-3">
+                <h3 className="text-[13px] font-medium text-ink">Close with verified outcome</h3>
+                <Field label="Closure reason" htmlFor="drawer-reason">
+                  <Select id="drawer-reason" value={closureReason} onChange={(e) => onClosureReasonChange(e.target.value)}>
+                    {CLOSURE_REASONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Outcome source" htmlFor="drawer-source" hint="Clinician or facility desk that confirmed the outcome.">
+                  <Input
+                    id="drawer-source"
+                    value={outcomeSource}
+                    onChange={(e) => onOutcomeSourceChange(e.target.value)}
+                    placeholder={`Focal clinician, ${referral.receivingFacility}`}
+                  />
+                </Field>
+                <Button type="submit" variant="success" className="w-full">
+                  Verify outcome & close referral
+                </Button>
+              </form>
+            </section>
+          )}
         </div>
-      )}
+      </aside>
     </div>
   );
 }

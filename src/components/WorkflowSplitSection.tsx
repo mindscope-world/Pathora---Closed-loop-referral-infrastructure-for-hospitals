@@ -1,158 +1,67 @@
-import { useState } from 'react';
-import { UserCheck, BellRing, CheckSquare, ArrowLeftRight } from 'lucide-react';
+import { ArrowLeftRight, BellRing, CheckSquare, UserCheck } from 'lucide-react';
 import { CORE_PILLARS, WORKFLOW_STAGES } from '../data/pathoraData';
+import { Card } from './ui';
 
-const PILLAR_ICONS = [UserCheck, BellRing, CheckSquare, ArrowLeftRight];
+const PILLAR_ICONS = {
+  ownership: UserCheck,
+  sla: BellRing,
+  verification: CheckSquare,
+  interoperability: ArrowLeftRight,
+} as const;
 
 export function WorkflowSplitSection() {
-  const [activeStageId, setActiveStageId] = useState<number>(4);
-  const activeStage =
-    WORKFLOW_STAGES.find((stage) => stage.id === activeStageId) ?? WORKFLOW_STAGES[0];
-
   return (
-    <section id="workflow" className="py-14 sm:py-20">
-      <div className="max-w-[1200px] mx-auto px-4 sm:px-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-stretch">
-          {/* Left Column: Signature Teal Visual Frame with Dark Cross Motif & Interactive 7-Stage Engine */}
-          <div className="lg:col-span-6 flex">
-            <div className="relative w-full overflow-hidden rounded-[2rem] bg-gradient-to-br from-[#009CA6] via-[#057C94] to-[#062E52] p-6 sm:p-8 flex flex-col justify-between shadow-[0_20px_50px_-15px_rgba(0,142,151,0.28)]">
-              {/* Geometric Medical Cross Cutout Accent (borrowed directly from reference Section 2) */}
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute -bottom-10 -left-10 w-44 h-44 text-[#04152E] opacity-90"
-              >
-                <svg viewBox="0 0 120 120" fill="currentColor" className="w-full h-full">
-                  <path d="M42 10H78V42H110V78H78V110H42V78H10V42H42V10Z" />
-                </svg>
-              </div>
+    <section id="workflow" className="py-16 sm:py-20 scroll-mt-16">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16">
+        <div className="lg:col-span-5 space-y-8">
+          <div className="space-y-3">
+            <h2 className="text-3xl font-semibold tracking-tight text-ink">How Pathora closes the loop</h2>
+            <p className="text-ink-2 leading-relaxed">
+              Referrals usually disappear once they leave the screening site. Pathora keeps each one owned, timed and
+              verified until care is confirmed.
+            </p>
+          </div>
 
-              <div className="relative z-10 space-y-5">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-medium text-teal-100">
-                      Interactive case engine
-                    </p>
-                    <h3 className="font-display text-lg sm:text-xl font-bold text-white mt-0.5">
-                      Seven Stages to Accountability
-                    </h3>
-                  </div>
-                  <span className="font-mono text-xs tabular-nums text-teal-100 bg-white/15 px-2.5 py-1 rounded-md whitespace-nowrap">
-                    Stage {activeStage.id} / 7
+          <ul className="space-y-5">
+            {CORE_PILLARS.map((pillar) => {
+              const Icon = PILLAR_ICONS[pillar.id as keyof typeof PILLAR_ICONS];
+              return (
+                <li key={pillar.id} className="flex gap-4">
+                  <span className="size-9 shrink-0 rounded-md bg-brand-soft text-brand flex items-center justify-center">
+                    <Icon className="size-[18px]" />
                   </span>
-                </div>
-
-                {/* Stage Selector Strip */}
-                <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
-                  {WORKFLOW_STAGES.map((stage) => {
-                    const isActive = stage.id === activeStage.id;
-                    return (
-                      <button
-                        key={stage.id}
-                        type="button"
-                        onClick={() => setActiveStageId(stage.id)}
-                        className={`px-2 py-2 rounded-xl text-center transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${
-                          isActive
-                            ? 'bg-white text-[#061B3A] font-semibold shadow-sm'
-                            : 'bg-[#061B3A]/40 text-teal-50 hover:bg-[#061B3A]/65'
-                        }`}
-                      >
-                        <span className="block font-mono text-[11px] tabular-nums opacity-75">
-                          0{stage.id}
-                        </span>
-                        <span className="block text-[11px] font-medium truncate mt-0.5">
-                          {stage.shortLabel}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Elevated White Case Screen Card (echoing tablet/phone UI inside reference Section 2) */}
-                <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-xl border border-slate-100 space-y-4">
-                  <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3.5">
-                    <div>
-                      <p className="text-xs font-medium text-[#00828C]">
-                        Active Stage · {activeStage.slaWindow}
-                      </p>
-                      <h4 className="font-display text-lg font-bold text-[#061B3A] mt-0.5">
-                        {activeStage.id}. {activeStage.title}
-                      </h4>
-                    </div>
-                    <span className="font-mono text-xs tabular-nums text-slate-500 whitespace-nowrap">
-                      CASE-2026-0418
-                    </span>
+                  <div className="space-y-1">
+                    <h3 className="text-[15px] font-semibold text-ink">{pillar.title}</h3>
+                    <p className="text-sm text-ink-2 leading-relaxed">{pillar.description}</p>
                   </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
 
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-xs font-semibold text-slate-500">Pathora Action</p>
-                      <p className="text-sm text-[#061B3A] leading-relaxed mt-1">
-                        {activeStage.action}
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5">
-                      <p className="text-xs font-semibold text-slate-500">Evidence Recorded</p>
-                      <p className="text-sm text-slate-700 mt-1 leading-relaxed">
-                        {activeStage.evidence}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3 text-xs">
-                    <span className="text-slate-600 truncate font-mono">
-                      {activeStage.sampleEvent}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="relative z-10 mt-6 flex items-center justify-end">
-                <p className="text-xs text-teal-50/90 text-right max-w-xs">
-                  Condition-agnostic case engine: every stage transition is timestamped and attributed to a named owner.
-                </p>
-              </div>
+        <div className="lg:col-span-7">
+          <Card>
+            <div className="px-5 py-4 border-b border-line flex items-baseline justify-between gap-4">
+              <h3 className="text-[15px] font-semibold text-ink">The seven tracked stages</h3>
+              <span className="text-xs text-ink-3">Target time from screen</span>
             </div>
-          </div>
-
-          {/* Right Column: Headline + 4 Stacked Icon Cards (matching reference Section 2) */}
-          <div className="lg:col-span-6 flex flex-col justify-center space-y-6">
-            <div className="space-y-3">
-              <h2
-                className="font-display font-bold tracking-tight text-[#061B3A] leading-[1.15]"
-                style={{ fontSize: 'clamp(1.75rem, 3vw, 2.35rem)', textWrap: 'balance' }}
-              >
-                Accountability built into every clinical handoff.
-              </h2>
-              <p className="text-base text-slate-600 leading-relaxed max-w-xl">
-                When follow-up lives across phone calls, paper forms, and spreadsheets, visibility vanishes. Pathora adds a lightweight accountability layer between screening programmes and receiving facilities.
-              </p>
-            </div>
-
-            <div className="space-y-3.5">
-              {CORE_PILLARS.map((pillar, idx) => {
-                const Icon = PILLAR_ICONS[idx];
-                return (
-                  <div
-                    key={pillar.id}
-                    className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 flex items-start gap-4 hover:border-[#009CA6]/50 transition-colors duration-150"
-                  >
-                    <div className="w-12 h-12 rounded-xl bg-[#009CA6]/12 text-[#00828C] flex items-center justify-center shrink-0">
-                      <Icon className="w-6 h-6" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="font-display text-base font-bold text-[#061B3A]">
-                        {pillar.title}
-                      </h3>
-                      <p className="text-sm text-slate-600 leading-relaxed mt-1">
-                        {pillar.description}
-                      </p>
-                    </div>
+            <ol>
+              {WORKFLOW_STAGES.map((stage) => (
+                <li
+                  key={stage.id}
+                  className="px-5 py-3.5 border-b border-line last:border-0 grid grid-cols-[28px_1fr_auto] gap-x-3 items-start"
+                >
+                  <span className="text-sm tabular-nums text-ink-3 pt-px">{String(stage.id).padStart(2, '0')}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink">{stage.title}</p>
+                    <p className="text-[13px] text-ink-3 leading-relaxed">{stage.evidence}</p>
                   </div>
-                );
-              })}
-            </div>
-          </div>
+                  <span className="text-xs tabular-nums text-ink-2 whitespace-nowrap pt-0.5">{stage.slaWindow}</span>
+                </li>
+              ))}
+            </ol>
+          </Card>
         </div>
       </div>
     </section>

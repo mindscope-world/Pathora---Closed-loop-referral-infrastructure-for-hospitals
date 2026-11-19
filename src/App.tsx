@@ -93,7 +93,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#061B3A]">
+    <div className="min-h-screen flex flex-col bg-canvas text-ink">
       <Navbar
         onOpenDiscovery={handleOpenDiscovery}
         onOpenLogin={() => navigateTo('login')}

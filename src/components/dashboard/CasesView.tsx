@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Search, Plus, Upload, RotateCcw } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { CaseStatus, PathwayName, ReferralCase } from '../../data/dashboardData';
 import { ReferralProgressTracker } from './ReferralProgressTracker';
+import { Badge, Button, Card, EmptyState, Input, PageHeader, Select, StatusBadge, cn, table } from '../ui';
 
 interface CasesViewProps {
   cases: ReferralCase[];
@@ -10,24 +11,12 @@ interface CasesViewProps {
   onOpenCsvImport: () => void;
 }
 
-const STATUS_FILTERS: Array<'All' | CaseStatus> = [
-  'All',
-  'Active',
-  'Awaiting Ack',
-  'Overdue SLA',
-  'Closed Verified',
-];
+const STATUS_FILTERS: Array<'All' | CaseStatus> = ['All', 'Active', 'Awaiting Ack', 'Overdue SLA', 'Closed Verified'];
 
-export function CasesView({
-  cases,
-  onSelectCase,
-  onOpenNewCase,
-  onOpenCsvImport,
-}: CasesViewProps) {
+export function CasesView({ cases, onSelectCase, onOpenNewCase, onOpenCsvImport }: CasesViewProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | CaseStatus>('All');
   const [pathwayFilter, setPathwayFilter] = useState<'All' | PathwayName>('All');
-  const [spotlightId, setSpotlightId] = useState<string>(cases[0]?.id ?? '');
 
   const filtered = cases.filter((c) => {
     const matchesStatus = statusFilter === 'All' || c.status === statusFilter;
@@ -43,6 +32,9 @@ export function CasesView({
     return matchesStatus && matchesPathway && matchesSearch;
   });
 
+  const countFor = (status: 'All' | CaseStatus) =>
+    status === 'All' ? cases.length : cases.filter((c) => c.status === status).length;
+
   const resetFilters = () => {
     setSearch('');
     setStatusFilter('All');
@@ -50,222 +42,143 @@ export function CasesView({
   };
 
   return (
-    <div className="space-y-5">
-      {/* Filter Toolbar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
+    <div>
+      <PageHeader
+        title="Referrals"
+        description="Every positive screen, from handoff to verified outcome."
+      />
+
+      <Card className="overflow-hidden">
+        <div className="px-4 pt-3 border-b border-line">
+          <div role="tablist" aria-label="Filter by status" className="flex gap-5 overflow-x-auto -mb-px">
+            {STATUS_FILTERS.map((status) => {
+              const active = statusFilter === status;
+              return (
+                <button
+                  key={status}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setStatusFilter(status)}
+                  className={cn(
+                    'pb-2.5 text-sm whitespace-nowrap border-b-2 transition-colors cursor-pointer',
+                    active ? 'border-brand text-ink font-medium' : 'border-transparent text-ink-3 hover:text-ink'
+                  )}
+                >
+                  {status}
+                  <span className="ml-1.5 text-xs tabular-nums text-ink-3">{countFor(status)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="p-4 flex flex-col sm:flex-row gap-3 sm:items-center">
+          <div className="relative flex-1 sm:max-w-sm">
+            <Search className="size-4 text-ink-3 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Input
+              type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search patient name, referral ID, coordinator, or hospital..."
-              className="w-full pl-9 pr-3.5 py-2 text-sm bg-[#F8FAFC] border border-slate-200 rounded-lg text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
+              placeholder="Search patient, ID, owner or facility"
+              aria-label="Search referrals"
+              className="pl-8"
             />
           </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <select
-              value={pathwayFilter}
-              onChange={(e) => setPathwayFilter(e.target.value as 'All' | PathwayName)}
-              aria-label="Filter by pathway"
-              className="px-3 py-2 text-xs font-medium bg-[#F8FAFC] border border-slate-200 rounded-lg text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-            >
-              <option value="All">All Pathways</option>
-              <option value="Cancer Screening">Cancer Screening</option>
-              <option value="NCD Screening">NCD Screening</option>
-              <option value="Male Reproductive Health">Male Reproductive Health</option>
-            </select>
-
-            <button
-              type="button"
-              onClick={onOpenCsvImport}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#061B3A] bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Import CSV</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onOpenNewCase}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Log Positive Screen</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Segmented Status Filter */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
-          <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-lg">
-            {STATUS_FILTERS.map((status) => (
-              <button
-                key={status}
-                type="button"
-                onClick={() => setStatusFilter(status)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
-                  statusFilter === status
-                    ? 'bg-white text-[#061B3A] shadow-sm font-semibold'
-                    : 'text-slate-600 hover:text-[#061B3A]'
-                }`}
-              >
-                {status}
-              </button>
-            ))}
-          </div>
-          <span className="font-mono text-xs tabular-nums text-slate-500">
-            Showing {filtered.length} of {cases.length} cases
+          <Select
+            value={pathwayFilter}
+            onChange={(e) => setPathwayFilter(e.target.value as 'All' | PathwayName)}
+            aria-label="Filter by pathway"
+            className="sm:w-56"
+          >
+            <option value="All">All pathways</option>
+            <option value="Cancer Screening">Cancer Screening</option>
+            <option value="NCD Screening">NCD Screening</option>
+            <option value="Male Reproductive Health">Male Reproductive Health</option>
+          </Select>
+          <span className="sm:ml-auto text-[13px] text-ink-3 tabular-nums">
+            {filtered.length} of {cases.length}
           </span>
         </div>
-      </div>
 
-      {/* Individual Referral Progress Spotlight */}
-      {cases.length > 0 && (() => {
-        const spotlightCase =
-          cases.find((c) => c.id === spotlightId) ?? filtered[0] ?? cases[0];
-        return (
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h2 className="font-display text-sm font-bold text-[#061B3A]">
-                  Individual Referral Progress Tracker
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Select any referral to inspect its closed-loop care progression
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  aria-label="Select referral to track"
-                  value={spotlightCase.id}
-                  onChange={(e) => setSpotlightId(e.target.value)}
-                  className="px-3 py-1.5 text-xs font-mono bg-[#F8FAFC] border border-slate-200 rounded-lg text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-                >
-                  {cases.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.id} · {c.patientName} ({c.patientCode})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => onSelectCase(spotlightCase)}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-white bg-[#061B3A] hover:bg-[#0B2954] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-                >
-                  Manage Case →
-                </button>
-              </div>
-            </div>
-            <ReferralProgressTracker referral={spotlightCase} variant="full" />
+        {filtered.length === 0 ? (
+          <div className="border-t border-line">
+            <EmptyState
+              title={cases.length === 0 ? 'No referrals yet' : 'No referrals match these filters'}
+              description={
+                cases.length === 0
+                  ? 'Log a positive screen or import a CSV batch to start tracking.'
+                  : 'Clear the search or switch back to all pathways and statuses.'
+              }
+              action={
+                cases.length === 0 ? (
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={onOpenCsvImport}>
+                      Import CSV
+                    </Button>
+                    <Button size="sm" onClick={onOpenNewCase}>
+                      Log positive screen
+                    </Button>
+                  </div>
+                ) : (
+                  <Button variant="secondary" size="sm" onClick={resetFilters}>
+                    Reset filters
+                  </Button>
+                )
+              }
+            />
           </div>
-        );
-      })()}
-
-      {/* Data Grid or Empty State */}
-      {filtered.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-3">
-          <p className="font-display text-base font-bold text-[#061B3A]">
-            No referral cases match your current filter
-          </p>
-          <p className="text-sm text-slate-600 max-w-md mx-auto">
-            Try clearing your search query or switching back to all pathways and statuses.
-          </p>
-          <div className="pt-2 flex items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={resetFilters}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-[#061B3A] border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset Filters</span>
-            </button>
-            <button
-              type="button"
-              onClick={onOpenNewCase}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#008E97] rounded-lg hover:bg-[#00767E] cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Log Positive Screen</span>
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500">
-                  <th className="py-3 px-4">Case ID</th>
-                  <th className="py-3 px-3">Patient</th>
-                  <th className="py-3 px-3">Pathway</th>
-                  <th className="py-3 px-3">Named Owner</th>
-                  <th className="py-3 px-3">Receiving Facility</th>
-                  <th className="py-3 px-3">Journey Progress</th>
-                  <th className="py-3 px-3">Status</th>
-                  <th className="py-3 px-4 text-right">Due Date</th>
+        ) : (
+          <div className={cn(table.wrap, 'border-t border-line')}>
+            <table className={table.table}>
+              <thead className={table.thead}>
+                <tr>
+                  <th className={table.th}>Patient</th>
+                  <th className={table.th}>Owner</th>
+                  <th className={table.th}>Facility</th>
+                  <th className={table.th}>Progress</th>
+                  <th className={table.th}>Status</th>
+                  <th className={cn(table.th, 'text-right')}>Due</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-sm">
+              <tbody>
                 {filtered.map((c) => (
                   <tr
                     key={c.id}
-                    onClick={() => {
-                      setSpotlightId(c.id);
-                      onSelectCase(c);
-                    }}
-                    className="hover:bg-slate-50/90 transition-colors cursor-pointer"
+                    onClick={() => onSelectCase(c)}
+                    onKeyDown={(e) => e.key === 'Enter' && onSelectCase(c)}
+                    tabIndex={0}
+                    className={cn(table.tr, 'cursor-pointer')}
                   >
-                    <td className="py-3 px-4 font-mono text-xs font-semibold text-[#061B3A] tabular-nums whitespace-nowrap">
-                      {c.id}
+                    <td className={table.td}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium whitespace-nowrap">{c.patientName}</span>
+                        {c.redFlag && <Badge tone="danger">Red flag</Badge>}
+                      </div>
+                      <div className="text-xs text-ink-3 whitespace-nowrap">
+                        <span className="font-mono">{c.id}</span> · {c.pathway}
+                      </div>
                     </td>
-                    <td className="py-3 px-3 whitespace-nowrap">
-                      <span className="text-xs font-semibold text-[#061B3A] block">
-                        {c.patientName}
+                    <td className={cn(table.td, 'text-ink-2 whitespace-nowrap')}>{c.coordinator}</td>
+                    <td className={cn(table.td, 'text-ink-2')}>
+                      <span className="block max-w-[200px] truncate" title={c.receivingFacility}>
+                        {c.receivingFacility}
                       </span>
-                      <span className="font-mono text-[11px] text-slate-500">
-                        {c.patientCode} · {c.patientLabel}
-                      </span>
                     </td>
-                    <td className="py-3 px-3 text-xs text-slate-700 whitespace-nowrap">
-                      {c.pathway}
-                    </td>
-                    <td className="py-3 px-3 text-xs font-medium text-[#061B3A] whitespace-nowrap">
-                      {c.coordinator}
-                    </td>
-                    <td className="py-3 px-3 text-xs text-slate-600 truncate max-w-[180px]">
-                      {c.receivingFacility}
-                    </td>
-                    <td className="py-3 px-3">
+                    <td className={table.td}>
                       <ReferralProgressTracker referral={c} variant="compact" />
                     </td>
-                    <td className="py-3 px-3 whitespace-nowrap">
-                      <span
-                        className={`text-xs font-semibold ${
-                          c.status === 'Closed Verified'
-                            ? 'text-emerald-700'
-                            : c.status === 'Overdue SLA'
-                            ? 'text-red-700'
-                            : c.status === 'Awaiting Ack'
-                            ? 'text-amber-700'
-                            : 'text-[#00828C]'
-                        }`}
-                      >
-                        {c.status}
-                      </span>
+                    <td className={table.td}>
+                      <StatusBadge status={c.status} />
                     </td>
-                    <td className="py-3 px-4 text-right font-mono text-xs tabular-nums text-slate-600 whitespace-nowrap">
-                      {c.dueDate}
-                    </td>
+                    <td className={cn(table.td, 'text-right text-ink-2 tabular-nums whitespace-nowrap')}>{c.dueDate}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </Card>
     </div>
   );
 }

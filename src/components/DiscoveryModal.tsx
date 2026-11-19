@@ -1,7 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react';
-import { X, CheckCircle2, ArrowRight } from 'lucide-react';
-import { PathoraMark } from './PathoraMark';
+import { CheckCircle2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { Alert, Button, Field, Input, Modal, Select } from './ui';
 
 interface DiscoveryModalProps {
   isOpen: boolean;
@@ -9,12 +9,7 @@ interface DiscoveryModalProps {
   onClose: () => void;
 }
 
-const PATHWAY_CHOICES = [
-  'Cancer Screening',
-  'NCD Screening',
-  'Male Reproductive Health',
-  'Maternal & Child Health',
-];
+const PATHWAY_CHOICES = ['Cancer Screening', 'NCD Screening', 'Male Reproductive Health', 'Maternal & Child Health'];
 
 export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryModalProps) {
   const [name, setName] = useState('');
@@ -30,15 +25,6 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
       setPathway(initialPathway);
     }
   }, [initialPathway]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -76,162 +62,73 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
     onClose();
   };
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#061B3A]/60 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="discovery-modal-title"
-      onClick={resetAndClose}
-    >
-      <div
-        className="relative w-full max-w-lg bg-white rounded-[1.5rem] border border-slate-200 shadow-2xl p-6 sm:p-8"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-4 pb-4 border-b border-slate-100">
-          <PathoraMark variant="light" />
-          <button
-            type="button"
-            onClick={resetAndClose}
-            aria-label="Close modal"
-            className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-[#061B3A] hover:bg-slate-50 transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {submitted ? (
-          <div className="py-6 space-y-5">
-            <div className="w-12 h-12 rounded-2xl bg-[#009CA6]/12 text-[#00828C] flex items-center justify-center">
-              <CheckCircle2 className="w-6 h-6" />
-            </div>
-            <div className="space-y-2">
-              <h3 id="discovery-modal-title" className="font-display text-xl font-bold text-[#061B3A]">
-                Walkthrough Request Logged
-              </h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                We&apos;ve prepared a 30–45 minute pathway discovery brief for{' '}
-                <span className="font-semibold text-[#061B3A]">{organization}</span> focusing on{' '}
-                <span className="font-semibold text-[#00828C]">{pathway}</span>.
-              </p>
-            </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-600 space-y-1">
-              <p>Next step: Confirm your clinical lead, data protection contact, and receiving facility route during discovery.</p>
-            </div>
-            <button
-              type="button"
-              onClick={resetAndClose}
-              className="w-full py-3 text-sm font-semibold text-white bg-[#061B3A] hover:bg-[#0B2954] rounded-full transition-colors cursor-pointer"
-            >
-              Done
-            </button>
+  if (submitted) {
+    return (
+      <Modal title="Request received" onClose={resetAndClose}>
+        <div className="space-y-4" role="status">
+          <CheckCircle2 className="size-8 text-success" />
+          <p className="text-sm text-ink-2 leading-relaxed">
+            We’ll be in touch at <span className="text-ink">{email}</span> to schedule a{' '}
+            <span className="text-ink">{pathway}</span> walkthrough for{' '}
+            <span className="text-ink">{organization}</span>. Bring your clinical lead and data protection contact if
+            you can.
+          </p>
+          <div className="flex justify-end">
+            <Button onClick={resetAndClose}>Done</Button>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} noValidate className="pt-5 space-y-4">
-            <div>
-              <h3 id="discovery-modal-title" className="font-display text-xl font-bold text-[#061B3A]">
-                Schedule a Discovery Walkthrough
-              </h3>
-              <p className="text-sm text-slate-600 mt-1">
-                30–45 minutes with your programme, clinical, and digital health leads to map one screening-to-care pathway.
-              </p>
-            </div>
+        </div>
+      </Modal>
+    );
+  }
 
-            {error && (
-              <div
-                role="alert"
-                className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5"
-              >
-                {error}
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <div>
-                <label htmlFor="modal-name" className="block text-xs font-semibold text-[#061B3A] mb-1">
-                  Your Name
-                </label>
-                <input
-                  id="modal-name"
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Pauline Kamau"
-                  className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="modal-org" className="block text-xs font-semibold text-[#061B3A] mb-1">
-                  Organization / Facility
-                </label>
-                <input
-                  id="modal-org"
-                  type="text"
-                  required
-                  value={organization}
-                  onChange={(e) => setOrganization(e.target.value)}
-                  placeholder="Screening Programme or Hospital"
-                  className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor="modal-email" className="block text-xs font-semibold text-[#061B3A] mb-1">
-                    Work Email
-                  </label>
-                  <input
-                    id="modal-email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@org.org"
-                    className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="modal-pathway" className="block text-xs font-semibold text-[#061B3A] mb-1">
-                    Target Pathway
-                  </label>
-                  <select
-                    id="modal-pathway"
-                    value={pathway}
-                    onChange={(e) => setPathway(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-                  >
-                    {PATHWAY_CHOICES.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={resetAndClose}
-                className="px-4 py-2.5 text-sm font-medium text-slate-600 hover:text-[#061B3A] cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 disabled:cursor-wait rounded-full transition-colors cursor-pointer"
-              >
-                <span>{submitting ? 'Sending…' : 'Confirm Request'}</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
+  return (
+    <Modal
+      title="Book a walkthrough"
+      description="30–45 minutes to map one screening-to-care pathway with your team."
+      onClose={resetAndClose}
+    >
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        {error && <Alert>{error}</Alert>}
+        <Field label="Your name" htmlFor="modal-name">
+          <Input id="modal-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="Organization or facility" htmlFor="modal-org">
+          <Input
+            id="modal-org"
+            autoComplete="organization"
+            value={organization}
+            onChange={(e) => setOrganization(e.target.value)}
+          />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Work email" htmlFor="modal-email">
+            <Input
+              id="modal-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </Field>
+          <Field label="Pathway" htmlFor="modal-pathway">
+            <Select id="modal-pathway" value={pathway} onChange={(e) => setPathway(e.target.value)}>
+              {PATHWAY_CHOICES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" onClick={resetAndClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Sending…' : 'Request walkthrough'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

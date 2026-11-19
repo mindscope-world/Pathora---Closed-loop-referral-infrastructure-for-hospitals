@@ -114,25 +114,25 @@ export const CORE_PILLARS = [
     id: 'ownership',
     title: 'Named Case Ownership',
     description:
-      'Every positive screen is assigned to a specific coordinator or team with clear next steps and agreed deadlines—eliminating post-handoff drift.',
+      'Every positive screen has a named coordinator, a next step and a deadline.',
   },
   {
     id: 'sla',
     title: 'Time-Bound SLA Escalations',
     description:
-      'Automated reminders and partner-approved human escalation queues surface stalled or unacknowledged referrals before patients drop out.',
+      'Stalled or unacknowledged referrals are escalated to a person before patients drop out.',
   },
   {
     id: 'verification',
     title: 'Distinct Event Verification',
     description:
-      'Sending a referral never closes a case. Referral issued, facility acknowledged, patient attended, and clinical outcome are recorded separately.',
+      'Sent, acknowledged, attended and outcome are recorded separately. Sending never closes a case.',
   },
   {
     id: 'interoperability',
     title: 'Lightweight Interoperability',
     description:
-      'Complements existing EMRs, NGO intake tools, and national HIEs without replacing them—launching via secure CSV and scaling to FHIR APIs.',
+      'Works beside existing EMRs and intake tools. Start with CSV, grow into FHIR APIs.',
   },
 ];
 
