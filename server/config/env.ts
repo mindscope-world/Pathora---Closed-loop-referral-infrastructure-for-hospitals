@@ -26,6 +26,9 @@ const schema = z.object({
   SMTP_URL: z.string().url().optional(),
   MAIL_FROM: z.string().min(3).default('Pathora <no-reply@pathora.example>'),
 
+  // Where walkthrough requests from the public site are emailed (needs SMTP_URL). They are always stored regardless.
+  LEADS_NOTIFY_EMAIL: z.string().email().optional(),
+
   // Messaging provider (used from Phase 7). 'mock' needs no credentials.
   MESSAGING_PROVIDER: z.enum(['mock', 'africastalking']).default('mock'),
   AT_USERNAME: z.string().optional(),

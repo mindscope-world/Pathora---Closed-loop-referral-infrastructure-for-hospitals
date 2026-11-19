@@ -1,6 +1,8 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { X, CheckCircle2, ArrowRight } from 'lucide-react';
 import { PathoraMark } from './PathoraMark';
+import { submitLead } from '../api/leads';
+import { ApiError } from '../lib/api';
 
 interface DiscoveryModalProps {
   isOpen: boolean;
@@ -22,6 +24,8 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
   const [pathway, setPathway] = useState(initialPathway || PATHWAY_CHOICES[0]);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [website, setWebsite] = useState(''); // honeypot: hidden from people, filled in by bots
 
   useEffect(() => {
     if (initialPathway) {
@@ -40,8 +44,9 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
     if (!name.trim() || !organization.trim()) {
       setError('Please enter your name and organization.');
@@ -52,7 +57,27 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
       return;
     }
     setError(null);
-    setSubmitted(true);
+    setSubmitting(true);
+    try {
+      await submitLead({ name: name.trim(), organization: organization.trim(), email: email.trim(), pathway, website });
+      setSubmitted(true);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const first = Object.values(err.fieldErrors)[0];
+        setError(
+          first ??
+            (err.status === 429
+              ? 'Too many requests from this network. Please try again later.'
+              : err.status >= 500
+              ? 'Something went wrong on our side. Please try again.'
+              : err.message),
+        );
+      } else {
+        setError('Could not reach the server. Check your connection and try again.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const resetAndClose = () => {
@@ -92,10 +117,10 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
             </div>
             <div className="space-y-2">
               <h3 id="discovery-modal-title" className="font-display text-xl font-bold text-[#061B3A]">
-                Walkthrough Request Logged
+                Walkthrough Request Received
               </h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                We&apos;ve prepared a 30–45 minute pathway discovery brief for{' '}
+                Thank you. Our team will contact you to arrange a 30–45 minute discovery session for{' '}
                 <span className="font-semibold text-[#061B3A]">{organization}</span> focusing on{' '}
                 <span className="font-semibold text-[#00828C]">{pathway}</span>.
               </p>
@@ -132,6 +157,11 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
             )}
 
             <div className="space-y-3">
+              {/* Honeypot: off-screen and skipped by keyboard and screen readers. */}
+              <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
+                <label htmlFor="modal-website">Website</label>
+                <input id="modal-website" type="text" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} />
+              </div>
               <div>
                 <label htmlFor="modal-name" className="block text-xs font-semibold text-[#061B3A] mb-1">
                   Your Name
@@ -207,9 +237,10 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
               </button>
               <button
                 type="submit"
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-full transition-colors cursor-pointer"
+                disabled={submitting}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 rounded-full transition-colors cursor-pointer"
               >
-                <span>Confirm Request</span>
+                <span>{submitting ? 'Sending…' : 'Confirm Request'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

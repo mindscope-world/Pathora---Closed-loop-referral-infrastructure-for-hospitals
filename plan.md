@@ -464,6 +464,18 @@ Move the client-side aggregations to the server so they are accurate over pagina
 1. `POST /leads` from `DiscoveryModal`. Zod validation (matching the current regex check), honeypot field and strict rate limit, and no auth. Email notification to the team.
 2. **`@google/genai` (optional, scoped):** the dependency and `MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API` suggest AI was planned. Keep the server-side key and **never send identifiable patient data**. Reasonable low-risk uses: drafting Kiswahili/English template variants for clinical review, and summarising de-identified programme metrics. Anything touching clinical decisions stays out of scope, because the product pitch is *deterministic* rules approved by a clinical lead.
 
+#### Phase 9 as built
+
+- **`POST /api/leads`** (public, no auth) behind `DiscoveryModal`. Validation matches the form's email check plus length
+  caps and no control characters (so names cannot inject mail headers); the email is lower-cased. A filled honeypot field
+  or a repeat of the same email + pathway within 24 h is dropped silently and still returns `202 {ok:true}`, so bots learn
+  nothing and double-clicks make no duplicates. Strict per-IP limit (5/hour). The lead is saved first; the team email
+  (`LEADS_NOTIFY_EMAIL`, needs `SMTP_URL`) is best effort and never fails the request.
+- **Frontend.** The modal posts to the server, shows a sending state, maps server errors (validation, rate limit, network)
+  to messages, and its confirmation text no longer claims a brief was already prepared. Hidden honeypot input.
+- **Not built: the AI layer.** It was marked optional, needs a live key to verify, and `@google/genai` is still an unused
+  dependency. If added: server-side only, de-identified inputs only, drafts for clinical review, never rules or decisions.
+
 ### Phase 10: Interoperability (Phase 2 product scope, 3+ days)
 The landing copy promises "secure CSV now, partner EMR APIs and FHIR later".
 1. Per-facility API keys (hashed, scoped) for `Status-Return` callbacks, with an HMAC-signed webhook for `acknowledge` and `outcome`.
