@@ -15,6 +15,8 @@ interface CommsConsentViewProps {
     templateName: string
   ) => void;
   onToggleOptOut: (caseId: string) => void;
+  /** Only the Data Protection Contact may record or reverse an opt-out (the server enforces). */
+  canManageConsent?: boolean;
 }
 
 export function CommsConsentView({
@@ -22,6 +24,7 @@ export function CommsConsentView({
   commsLog,
   onSendMessage,
   onToggleOptOut,
+  canManageConsent = true,
 }: CommsConsentViewProps) {
   const activeCases = cases.filter((c) => c.status !== 'Closed Verified');
   const [selectedCaseId, setSelectedCaseId] = useState<string>(
@@ -206,13 +209,15 @@ export function CommsConsentView({
                       )}
                     </td>
                     <td className="py-3 px-5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => onToggleOptOut(c.id)}
-                        className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-[#061B3A] cursor-pointer"
-                      >
-                        {c.optedOut ? 'Restore Consent' : 'Record Opt-Out'}
-                      </button>
+                      {canManageConsent && (
+                        <button
+                          type="button"
+                          onClick={() => onToggleOptOut(c.id)}
+                          className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-[#061B3A] cursor-pointer"
+                        >
+                          {c.optedOut ? 'Restore Consent' : 'Record Opt-Out'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

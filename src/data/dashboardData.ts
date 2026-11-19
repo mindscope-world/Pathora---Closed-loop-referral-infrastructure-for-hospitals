@@ -42,6 +42,11 @@ export interface ReferralCase {
   closureReason?: string;
   outcomeSource?: string;
   milestones: CaseMilestones;
+  /** Present on cases loaded from the API; used to address mutations. */
+  coordinatorId?: string;
+  facilityId?: string;
+  /** Optimistic-lock version from the server. */
+  version?: number;
 }
 
 export interface FacilityPartner {

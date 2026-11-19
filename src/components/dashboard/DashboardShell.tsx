@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useEffect, useRef, useState, FormEvent } from 'react';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -18,19 +18,20 @@ import {
   Search,
 } from 'lucide-react';
 import { PathoraMark } from '../PathoraMark';
-import { AuthUserSession } from '../auth/LoginPage';
+import { AuthUserSession, useAuth } from '../../auth/AuthProvider';
+import { can, type Permission } from '../../../shared/permissions';
+import { PATHWAY_LABELS, type CaseDto, type ImportCasesResponse, type PathwayId } from '../../../shared/types';
+import * as workspaceApi from '../../api/workspace';
+import { ApiError } from '../../lib/api';
+import { describeApiError, useWorkspace } from '../../data/useWorkspace';
 import {
   AuditEvent,
   CommsLogEntry,
   INITIAL_AUDIT_EVENTS,
-  INITIAL_CASES,
   INITIAL_COMMS_LOG,
-  INITIAL_FACILITIES,
   INITIAL_RULE_PACKS,
   INITIAL_TEAM,
-  PathwayName,
   PathwayRulePack,
-  ReferralCase,
   TeamMember,
 } from '../../data/dashboardData';
 import { OverviewView } from './OverviewView';
@@ -66,12 +67,20 @@ function nowTimestamp(): string {
 }
 
 export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellProps) {
+  const { user } = useAuth();
+  const role = user?.role;
+  /** Hides controls the server would reject. The server remains the only enforcement point. */
+  const allowed = (permission: Permission) => (role ? can(role, permission) : false);
+
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  // Core Stateful Workspace Data
-  const [cases, setCases] = useState<ReferralCase[]>(INITIAL_CASES);
-  const [facilities] = useState(INITIAL_FACILITIES);
+  // Referrals, facilities and assignable owners come from the API.
+  const ws = useWorkspace(role);
+  const { cases, facilities, assignees } = ws;
+
+  // Still demo data until their phases land: comms log (Phase 7), rule packs (Phase 6),
+  // audit trail (Phase 4) and team (Phase 5).
   const [commsLog, setCommsLog] = useState<CommsLogEntry[]>(INITIAL_COMMS_LOG);
   const [rulePacks, setRulePacks] = useState<PathwayRulePack[]>(INITIAL_RULE_PACKS);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(INITIAL_AUDIT_EVENTS);
@@ -92,26 +101,46 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   );
   const [outcomeSourceInput, setOutcomeSourceInput] = useState('');
 
-  // New Case Form State
+  // Feedback for case actions (acknowledge, close, escalate, ...)
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // New Case Form State (owner and facility are server ids)
   const [newPatientName, setNewPatientName] = useState('');
   const [newPatientCode, setNewPatientCode] = useState('');
   const [newPatientLabel, setNewPatientLabel] = useState('');
-  const [newPathway, setNewPathway] = useState<PathwayName>('Cancer Screening');
+  const [newPathway, setNewPathway] = useState<PathwayId>('CANCER_SCREENING');
   const [newSourceProgram, setNewSourceProgram] = useState('Nairobi Mobile Screening');
-  const [newCoordinator, setNewCoordinator] = useState('Miriam Wanjiku');
-  const [newFacility, setNewFacility] = useState(INITIAL_FACILITIES[0].name);
+  const [newCoordinator, setNewCoordinator] = useState('');
+  const [newFacility, setNewFacility] = useState('');
   const [newRedFlag, setNewRedFlag] = useState(false);
   const [newConsentSms, setNewConsentSms] = useState(true);
   const [newCaseError, setNewCaseError] = useState<string | null>(null);
+  const [newCaseBusy, setNewCaseBusy] = useState(false);
+  // One key per form attempt: a double-click or retry after a dropped response returns the same case.
+  const createKey = useRef(crypto.randomUUID());
 
   // CSV Import State
-  const [csvText, setCsvText] = useState(
-    'PT-8850,Cohort NBO · F / 47,Cancer Screening,Nairobi Mobile Cervical Screening,Miriam Wanjiku,Kenyatta Referral Outpatient Desk\nPT-8851,Cohort MBA · M / 55,NCD Screening,Coastal Preventive Health Drive,Amina Salim,Pwani Regional Care Hospital'
-  );
-  const [csvFeedback, setCsvFeedback] = useState<string | null>(null);
+  const [csvText, setCsvText] = useState('');
+  const [csvAttested, setCsvAttested] = useState(false);
+  const [csvResult, setCsvResult] = useState<ImportCasesResponse | null>(null);
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const [csvBusy, setCsvBusy] = useState(false);
+  const csvKey = useRef(crypto.randomUUID());
+
+  // Pre-select a sensible owner (yourself, if you can own cases) and facility once they load.
+  useEffect(() => {
+    if (!newCoordinator && assignees.length > 0) {
+      setNewCoordinator((assignees.find((a) => a.id === user?.id) ?? assignees[0]).id);
+    }
+    if (!newFacility && facilities.length > 0) setNewFacility(facilities[0].id);
+  }, [assignees, facilities, user?.id, newCoordinator, newFacility]);
 
   const selectedCase = cases.find((c) => c.id === selectedCaseId) ?? null;
+  const actorName = currentUser?.name ?? user?.name ?? 'Unknown user';
+  const actorRole = currentUser?.role ?? '';
 
+  /** Local record for the demo Audit & Exports screen. Phase 4 replaces it with the server's audit trail. */
   const appendAudit = (
     actor: string,
     role: string,
@@ -132,152 +161,72 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
       ...prev,
     ]);
   };
+  const localAudit = (action: string, resourceId: string, detail: string) =>
+    appendAudit(actorName, actorRole, action, resourceId, detail);
+
+  /**
+   * Runs one case action against the API and swaps in the server's version of the case.
+   * Failures are shown to the user; if our view of the case was stale we refresh it.
+   */
+  const run = async (action: () => Promise<CaseDto>): Promise<CaseDto | null> => {
+    setActionError(null);
+    setBusy(true);
+    try {
+      const dto = await action();
+      ws.upsertCase(dto);
+      return dto;
+    } catch (err) {
+      setActionError(describeApiError(err));
+      if (err instanceof ApiError && (err.code === 'VERSION_CONFLICT' || err.code === 'ILLEGAL_TRANSITION')) {
+        void ws.reload(true);
+      }
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const versionOf = (caseId: string) => cases.find((c) => c.id === caseId)?.version;
 
   // Case Actions
-  const handleAcknowledgeCase = (caseId: string) => {
-    const ts = nowTimestamp();
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId
-          ? {
-              ...c,
-              stage: 'Acknowledged',
-              status: c.status === 'Overdue SLA' ? 'Active' : 'Active',
-              milestones: { ...c.milestones, facilityAcknowledgedAt: ts },
-            }
-          : c
-      )
-    );
-    appendAudit(
-      'Receiving Facility Focal',
-      'Receiving Facility Focal',
-      'FACILITY_ACKNOWLEDGED',
-      caseId,
-      'Confirmed referral receipt via Receiving Facility Desk.'
-    );
+  const handleAcknowledgeCase = async (caseId: string) => {
+    const dto = await run(() => workspaceApi.acknowledgeCase(caseId, versionOf(caseId)));
+    if (dto) localAudit('FACILITY_ACKNOWLEDGED', caseId, 'Confirmed referral receipt via Receiving Facility Desk.');
   };
 
-  const handleConfirmAttendance = (caseId: string) => {
-    const ts = nowTimestamp();
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId
-          ? {
-              ...c,
-              stage: 'Attended',
-              status: 'Active',
-              milestones: {
-                ...c.milestones,
-                facilityAcknowledgedAt: c.milestones.facilityAcknowledgedAt ?? ts,
-                patientAttendedAt: ts,
-              },
-            }
-          : c
-      )
-    );
-    appendAudit(
-      'Receiving Facility Focal',
-      'Receiving Facility Focal',
-      'ATTENDANCE_CONFIRMED',
-      caseId,
-      'Confirmed patient clinical attendance at receiving facility.'
-    );
+  const handleConfirmAttendance = async (caseId: string) => {
+    const dto = await run(() => workspaceApi.confirmAttendance(caseId, versionOf(caseId)));
+    if (dto) localAudit('ATTENDANCE_CONFIRMED', caseId, 'Confirmed patient clinical attendance at receiving facility.');
   };
 
-  const handleDocumentClosure = (e: FormEvent) => {
+  const handleDocumentClosure = async (e: FormEvent) => {
     e.preventDefault();
     if (!selectedCase) return;
-    const source = outcomeSourceInput.trim() || `${selectedCase.receivingFacility} Focal`;
-    const ts = nowTimestamp();
-
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === selectedCase.id
-          ? {
-              ...c,
-              stage: 'Closed',
-              status: 'Closed Verified',
-              slaHoursRemaining: 0,
-              closureReason: closureReasonInput,
-              outcomeSource: source,
-              milestones: {
-                ...c.milestones,
-                facilityAcknowledgedAt: c.milestones.facilityAcknowledgedAt ?? ts,
-                patientAttendedAt: c.milestones.patientAttendedAt ?? ts,
-                evaluationCompletedAt: c.milestones.evaluationCompletedAt ?? ts,
-                outcomeDocumentedAt: ts,
-              },
-            }
-          : c
+    const dto = await run(() =>
+      workspaceApi.closeCase(
+        selectedCase.id,
+        { closureReason: closureReasonInput, outcomeSource: outcomeSourceInput.trim() || undefined },
+        selectedCase.version
       )
     );
-
-    appendAudit(
-      source,
-      'Receiving Facility Focal',
-      'OUTCOME_VERIFIED_CLOSURE',
-      selectedCase.id,
-      `Closed case with verified outcome: ${closureReasonInput}`
-    );
-    setOutcomeSourceInput('');
+    if (dto) {
+      localAudit('OUTCOME_VERIFIED_CLOSURE', selectedCase.id, `Closed case with verified outcome: ${closureReasonInput}`);
+      setOutcomeSourceInput('');
+    }
   };
 
-  const handleEscalateToClinicalLead = (caseId: string, reason: string) => {
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId
-          ? {
-              ...c,
-              stage: 'Escalated',
-              status: 'Overdue SLA',
-              notes: `${c.notes} | Escalated: ${reason}`,
-            }
-          : c
-      )
-    );
-    appendAudit(
-      'System SLA Monitor',
-      'Programme Coordinator',
-      'SLA_ESCALATION_TRIGGERED',
-      caseId,
-      reason
-    );
+  const handleEscalateToClinicalLead = async (caseId: string, reason: string) => {
+    const dto = await run(() => workspaceApi.escalateCase(caseId, { reason }, versionOf(caseId)));
+    if (dto) localAudit('CASE_ESCALATED', caseId, reason);
   };
 
-  const handleLogBarrierResolution = (caseId: string, barrierNote: string) => {
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId
-          ? {
-              ...c,
-              status: 'Active',
-              stage: c.stage === 'Escalated' ? 'Contacted' : c.stage,
-              slaHoursRemaining: 24,
-              notes: `Resolution logged: ${barrierNote}`,
-            }
-          : c
-      )
-    );
-    appendAudit(
-      'Miriam Wanjiku',
-      'Programme Coordinator',
-      'BARRIER_RESOLUTION_LOGGED',
-      caseId,
-      barrierNote
-    );
+  const handleLogBarrierResolution = async (caseId: string, barrierNote: string) => {
+    const dto = await run(() => workspaceApi.resolveBarrier(caseId, { note: barrierNote }, versionOf(caseId)));
+    if (dto) localAudit('BARRIER_RESOLUTION_LOGGED', caseId, barrierNote);
   };
 
-  const handleReassignOwner = (caseId: string, newOwner: string) => {
-    setCases((prev) =>
-      prev.map((c) => (c.id === caseId ? { ...c, coordinator: newOwner } : c))
-    );
-    appendAudit(
-      'Programme Manager',
-      'Programme Manager',
-      'CASE_REASSIGNED',
-      caseId,
-      `Named ownership transferred to ${newOwner}.`
-    );
+  const handleReassignOwner = async (caseId: string, coordinatorId: string) => {
+    const dto = await run(() => workspaceApi.reassignCase(caseId, coordinatorId, versionOf(caseId)));
+    if (dto) localAudit('CASE_REASSIGNED', caseId, `Named ownership transferred to ${dto.coordinator.name}.`);
   };
 
   const handleSendMessage = (
@@ -313,22 +262,20 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
     );
   };
 
-  const handleToggleOptOut = (caseId: string) => {
+  const handleToggleOptOut = async (caseId: string) => {
     const target = cases.find((c) => c.id === caseId);
     if (!target) return;
     const nextOptOut = !target.optedOut;
-    setCases((prev) =>
-      prev.map((c) => (c.id === caseId ? { ...c, optedOut: nextOptOut } : c))
-    );
-    appendAudit(
-      'Data Protection Contact',
-      'Data Protection Contact',
-      nextOptOut ? 'CONSENT_OPTOUT_RECORDED' : 'CONSENT_RESTORED',
-      caseId,
-      nextOptOut
-        ? 'Patient opted out of automated SMS/WhatsApp; routed to human coordinator.'
-        : 'Patient follow-up consent restored.'
-    );
+    const dto = await run(() => workspaceApi.setOptOut(caseId, nextOptOut));
+    if (dto) {
+      localAudit(
+        nextOptOut ? 'CONSENT_OPTOUT_RECORDED' : 'CONSENT_RESTORED',
+        caseId,
+        nextOptOut
+          ? 'Patient opted out of automated SMS/WhatsApp; routed to human coordinator.'
+          : 'Patient follow-up consent restored.'
+      );
+    }
   };
 
   const handleUpdateRulePackSla = (
@@ -350,130 +297,99 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
     );
   };
 
-  const handleCreateNewCase = (e: FormEvent) => {
+  const handleCreateNewCase = async (e: FormEvent) => {
     e.preventDefault();
+    if (newCaseBusy) return;
     if (!newPatientCode.trim() && !newPatientName.trim()) {
       setNewCaseError('Please enter a patient name or identifier code.');
       return;
     }
-
-    const newId = `REF-2026-0${418 + cases.length + 1}`;
-    const ts = nowTimestamp();
-    const code = newPatientCode.trim().toUpperCase() || `PT-${8850 + cases.length}`;
-    const name = newPatientName.trim() || `Patient ${code}`;
-    const created: ReferralCase = {
-      id: newId,
-      patientCode: code,
-      patientName: name,
-      patientLabel: newPatientLabel.trim() || 'Cohort NBO · Screened',
-      pathway: newPathway,
-      sourceProgram: newSourceProgram,
-      coordinator: newCoordinator,
-      receivingFacility: newFacility,
-      stage: 'Handoff Sent',
-      status: 'Awaiting Ack',
-      consentSms: newConsentSms,
-      consentWhatsApp: false,
-      optedOut: false,
-      createdAt: ts,
-      dueDate: '2026-11-23',
-      slaHoursRemaining: 36,
-      redFlag: newRedFlag,
-      notes: newRedFlag
-        ? 'Red-flag positive screen logged with expedited clinical escalation.'
-        : 'Positive screen logged; awaiting receiving facility acknowledgment.',
-      milestones: {
-        referralIssuedAt: ts,
-      },
-    };
-
-    setCases((prev) => [created, ...prev]);
-    appendAudit(
-      newCoordinator,
-      'Programme Coordinator',
-      'CASE_CREATED',
-      newId,
-      `Logged ${newPathway} positive screen (${created.patientName} · ${created.patientCode}) routed to ${newFacility}.`
-    );
-
-    setNewPatientName('');
-    setNewPatientCode('');
-    setNewPatientLabel('');
-    setNewRedFlag(false);
+    if (!newCoordinator || !newFacility) {
+      setNewCaseError('Choose a named owner and a receiving facility.');
+      return;
+    }
+    setNewCaseBusy(true);
     setNewCaseError(null);
-    setNewCaseModalOpen(false);
-    setActiveTab('cases');
+    try {
+      const dto = await workspaceApi.createCase(
+        {
+          patientName: newPatientName.trim() || undefined,
+          patientCode: newPatientCode.trim() || undefined,
+          patientLabel: newPatientLabel.trim() || undefined,
+          pathway: newPathway,
+          sourceProgram: newSourceProgram.trim(),
+          coordinatorId: newCoordinator,
+          facilityId: newFacility,
+          redFlag: newRedFlag,
+          consentSms: newConsentSms,
+        },
+        createKey.current
+      );
+      ws.upsertCase(dto);
+      createKey.current = crypto.randomUUID();
+      localAudit(
+        'CASE_CREATED',
+        dto.id,
+        `Logged ${PATHWAY_LABELS[dto.pathway]} positive screen (${dto.patientCode}) routed to ${dto.facility.name}.`
+      );
+      setNewPatientName('');
+      setNewPatientCode('');
+      setNewPatientLabel('');
+      setNewRedFlag(false);
+      setNewCaseModalOpen(false);
+      setActiveTab('cases');
+    } catch (err) {
+      setNewCaseError(describeApiError(err));
+    } finally {
+      setNewCaseBusy(false);
+    }
   };
 
-  const handleCsvImport = (e: FormEvent) => {
-    e.preventDefault();
-    const lines = csvText
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
+  const openCsvModal = () => {
+    // A ready-to-run sample built from this organisation's own owners and facilities.
+    if (!csvText.trim() && assignees[0] && facilities[0]) {
+      setCsvText(
+        `PT-8850,Cohort NBO · F / 47,Cancer Screening,Mobile Cervical Screening,${assignees[0].name},${facilities[0].name}`
+      );
+    }
+    setCsvResult(null);
+    setCsvError(null);
+    setCsvModalOpen(true);
+  };
 
-    if (lines.length === 0) {
-      setCsvFeedback('Please enter at least one CSV row to import.');
+  const submitCsv = async (dryRun: boolean) => {
+    if (csvBusy) return;
+    if (!csvText.trim()) {
+      setCsvError('Please enter at least one CSV row to import.');
       return;
     }
-
-    const ts = nowTimestamp();
-    const imported: ReferralCase[] = [];
-
-    lines.forEach((line, index) => {
-      const cols = line.split(',').map((s) => s.trim());
-      if (cols.length >= 2) {
-        const id = `REF-2026-0${418 + cases.length + index + 1}`;
-        const pathwayVal: PathwayName =
-          cols[2] === 'NCD Screening'
-            ? 'NCD Screening'
-            : cols[2] === 'Male Reproductive Health'
-            ? 'Male Reproductive Health'
-            : 'Cancer Screening';
-
-        imported.push({
-          id,
-          patientCode: cols[0] || `PT-IMP-${index + 1}`,
-          patientName: `Imported Patient ${cols[0] || index + 1}`,
-          patientLabel: cols[1] || 'CSV Imported Cohort',
-          pathway: pathwayVal,
-          sourceProgram: cols[3] || 'Secure CSV Intake',
-          coordinator: cols[4] || 'Miriam Wanjiku',
-          receivingFacility: cols[5] || INITIAL_FACILITIES[0].name,
-          stage: 'Handoff Sent',
-          status: 'Awaiting Ack',
-          consentSms: true,
-          consentWhatsApp: false,
-          optedOut: false,
-          createdAt: ts,
-          dueDate: '2026-11-24',
-          slaHoursRemaining: 48,
-          redFlag: false,
-          notes: 'Imported via Phase 1 Secure CSV Intake.',
-          milestones: { referralIssuedAt: ts },
-        });
+    setCsvBusy(true);
+    setCsvError(null);
+    try {
+      const res = await workspaceApi.importCases(
+        { csv: csvText, dryRun, consentAttested: csvAttested },
+        dryRun ? undefined : csvKey.current
+      );
+      setCsvResult(res);
+      if (!dryRun) {
+        csvKey.current = crypto.randomUUID();
+        await ws.reload(true);
+        if (res.imported > 0) {
+          localAudit('CSV_BATCH_IMPORTED', `BATCH-${res.imported}`, `Imported ${res.imported} consented referrals via secure CSV intake.`);
+        }
+        if (res.imported > 0 && res.rejected === 0) {
+          setTimeout(() => {
+            setCsvModalOpen(false);
+            setCsvResult(null);
+            setActiveTab('cases');
+          }, 900);
+        }
       }
-    });
-
-    if (imported.length === 0) {
-      setCsvFeedback('Could not parse valid rows. Expected comma-separated columns.');
-      return;
+    } catch (err) {
+      setCsvError(describeApiError(err));
+    } finally {
+      setCsvBusy(false);
     }
-
-    setCases((prev) => [...imported, ...prev]);
-    appendAudit(
-      'Programme Manager',
-      'Programme Manager',
-      'CSV_BATCH_IMPORTED',
-      `BATCH-${imported.length}`,
-      `Imported ${imported.length} consented referrals via secure CSV intake.`
-    );
-    setCsvFeedback(`Successfully imported ${imported.length} cases into the active queue.`);
-    setTimeout(() => {
-      setCsvFeedback(null);
-      setCsvModalOpen(false);
-      setActiveTab('cases');
-    }, 900);
   };
 
   const overdueCount = cases.filter((c) => c.status === 'Overdue SLA').length;
@@ -484,16 +400,19 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
     label: string;
     icon: typeof LayoutDashboard;
     count?: number;
-  }> = [
-    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-    { id: 'cases', label: 'Referrals & Cases', icon: ClipboardList, count: cases.length },
-    { id: 'facilities', label: 'Facility Desk', icon: Building2, count: awaitingAckCount },
-    { id: 'escalations', label: 'SLA Escalations', icon: AlertTriangle, count: overdueCount },
-    { id: 'comms', label: 'Patient Comms', icon: MessageSquare },
-    { id: 'pathways', label: 'Pathway Rules', icon: GitBranch },
-    { id: 'audit', label: 'Audit & Exports', icon: FileCheck2 },
-    { id: 'settings', label: 'Team & Settings', icon: Settings },
-  ];
+    permission: Permission;
+  }> = (
+    [
+      { id: 'overview', label: 'Overview', icon: LayoutDashboard, permission: 'metrics.read' },
+      { id: 'cases', label: 'Referrals & Cases', icon: ClipboardList, count: cases.length, permission: 'cases.read' },
+      { id: 'facilities', label: 'Facility Desk', icon: Building2, count: awaitingAckCount, permission: 'facilities.read' },
+      { id: 'escalations', label: 'SLA Escalations', icon: AlertTriangle, count: overdueCount, permission: 'cases.read' },
+      { id: 'comms', label: 'Patient Comms', icon: MessageSquare, permission: 'comms.read' },
+      { id: 'pathways', label: 'Pathway Rules', icon: GitBranch, permission: 'rulepacks.read' },
+      { id: 'audit', label: 'Audit & Exports', icon: FileCheck2, permission: 'audit.read' },
+      { id: 'settings', label: 'Team & Settings', icon: Settings, permission: 'team.read' },
+    ] as const
+  ).filter((item) => allowed(item.permission));
 
   const activeLabel = NAV_ITEMS.find((n) => n.id === activeTab)?.label ?? 'Overview';
 
@@ -733,14 +652,17 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           })()}
 
           <div className="flex items-center gap-2.5 shrink-0">
+            {allowed('cases.import') && (
             <button
               type="button"
-              onClick={() => setCsvModalOpen(true)}
+              onClick={openCsvModal}
               className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#061B3A] bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5" />
               <span>Import CSV</span>
             </button>
+            )}
+            {allowed('cases.create') && (
             <button
               type="button"
               onClick={() => setNewCaseModalOpen(true)}
@@ -750,11 +672,35 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               <span className="hidden sm:inline">Log Positive Screen</span>
               <span className="sm:hidden">Log Screen</span>
             </button>
+            )}
           </div>
         </header>
 
         {/* Active Page Viewport */}
         <main className="flex-1 p-4 sm:p-6 max-w-[1320px] w-full mx-auto">
+          {ws.status === 'error' && (
+            <div role="alert" className="mb-4 flex items-center justify-between gap-3 text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <span>{ws.error ?? 'Could not load referrals.'}</span>
+              <button type="button" onClick={() => void ws.reload()} className="font-semibold underline cursor-pointer">
+                Retry
+              </button>
+            </div>
+          )}
+          {actionError && !selectedCase && (
+            <div role="alert" className="mb-4 flex items-center justify-between gap-3 text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <span>{actionError}</span>
+              <button type="button" onClick={() => setActionError(null)} aria-label="Dismiss" className="cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+          {ws.status === 'loading' && (
+            <div aria-busy="true" className="py-16 text-center text-sm text-slate-500">
+              Loading referrals…
+            </div>
+          )}
+          {ws.status !== 'loading' && (
+            <>
           {activeTab === 'overview' && (
             <OverviewView
               cases={cases}
@@ -767,7 +713,9 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               cases={cases}
               onSelectCase={(c) => setSelectedCaseId(c.id)}
               onOpenNewCase={() => setNewCaseModalOpen(true)}
-              onOpenCsvImport={() => setCsvModalOpen(true)}
+              onOpenCsvImport={openCsvModal}
+              canCreate={allowed('cases.create')}
+              canImport={allowed('cases.import')}
             />
           )}
           {activeTab === 'facilities' && (
@@ -777,6 +725,8 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               onAcknowledgeCase={handleAcknowledgeCase}
               onConfirmAttendance={handleConfirmAttendance}
               onSelectCase={(c) => setSelectedCaseId(c.id)}
+              canAcknowledge={allowed('cases.acknowledge')}
+              canConfirmAttendance={allowed('cases.attend')}
             />
           )}
           {activeTab === 'escalations' && (
@@ -785,6 +735,8 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               onEscalateToClinicalLead={handleEscalateToClinicalLead}
               onLogBarrierResolution={handleLogBarrierResolution}
               onSelectCase={(c) => setSelectedCaseId(c.id)}
+              canEscalate={allowed('cases.escalate')}
+              canResolveBarrier={allowed('cases.barrier')}
             />
           )}
           {activeTab === 'comms' && (
@@ -793,6 +745,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               commsLog={commsLog}
               onSendMessage={handleSendMessage}
               onToggleOptOut={handleToggleOptOut}
+              canManageConsent={allowed('consent.manage')}
             />
           )}
           {activeTab === 'pathways' && (
@@ -840,6 +793,8 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                 );
               }}
             />
+          )}
+            </>
           )}
         </main>
       </div>
@@ -923,16 +878,25 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                   <label htmlFor="reassign-owner" className="block text-slate-500 mb-1">
                     Named Owner
                   </label>
-                  <select
-                    id="reassign-owner"
-                    value={selectedCase.coordinator}
-                    onChange={(e) => handleReassignOwner(selectedCase.id, e.target.value)}
-                    className="w-full font-semibold text-[#061B3A] bg-transparent focus:outline-none"
-                  >
-                    <option value="Miriam Wanjiku">Miriam Wanjiku</option>
-                    <option value="Peter Omondi">Peter Omondi</option>
-                    <option value="Amina Salim">Amina Salim</option>
-                  </select>
+                  {allowed('cases.reassign') && selectedCase.status !== 'Closed Verified' && assignees.length > 0 ? (
+                    <select
+                      id="reassign-owner"
+                      value={selectedCase.coordinatorId}
+                      disabled={busy}
+                      onChange={(e) => handleReassignOwner(selectedCase.id, e.target.value)}
+                      className="w-full font-semibold text-[#061B3A] bg-transparent focus:outline-none"
+                    >
+                      {assignees.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span id="reassign-owner" className="font-semibold text-[#061B3A] block truncate">
+                      {selectedCase.coordinator}
+                    </span>
+                  )}
                 </div>
                 <div className="border border-slate-200 rounded-xl p-3">
                   <span className="block text-slate-500 mb-1">Receiving Facility</span>
@@ -956,27 +920,48 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                 </div>
               ) : (
                 <div className="space-y-4 pt-2 border-t border-slate-100">
+                  {actionError && (
+                    <div role="alert" className="flex items-start justify-between gap-3 text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+                      <span>{actionError}</span>
+                      <button type="button" onClick={() => setActionError(null)} aria-label="Dismiss" className="cursor-pointer shrink-0">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-2">
-                    {!selectedCase.milestones.facilityAcknowledgedAt && (
+                    {!selectedCase.milestones.facilityAcknowledgedAt && allowed('cases.acknowledge') && (
                       <button
                         type="button"
+                        disabled={busy}
                         onClick={() => handleAcknowledgeCase(selectedCase.id)}
-                        className="px-3.5 py-2 text-xs font-semibold text-white bg-[#008E97] rounded-lg cursor-pointer"
+                        className="px-3.5 py-2 text-xs font-semibold text-white bg-[#008E97] rounded-lg cursor-pointer disabled:opacity-60"
                       >
                         Record Facility Ack
                       </button>
                     )}
-                    {!selectedCase.milestones.patientAttendedAt && (
+                    {selectedCase.milestones.facilityAcknowledgedAt &&
+                      !selectedCase.milestones.patientAttendedAt &&
+                      allowed('cases.attend') && (
                       <button
                         type="button"
+                        disabled={busy}
                         onClick={() => handleConfirmAttendance(selectedCase.id)}
-                        className="px-3.5 py-2 text-xs font-semibold text-white bg-[#061B3A] rounded-lg cursor-pointer"
+                        className="px-3.5 py-2 text-xs font-semibold text-white bg-[#061B3A] rounded-lg cursor-pointer disabled:opacity-60"
                       >
                         Confirm Patient Attendance
                       </button>
                     )}
                   </div>
 
+                  {!selectedCase.milestones.patientAttendedAt || !allowed('cases.close') ? (
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      {!allowed('cases.close')
+                        ? 'The receiving facility documents the verified outcome and closes the case.'
+                        : !selectedCase.milestones.facilityAcknowledgedAt
+                        ? 'Next step: the facility acknowledges the referral. A case can be closed only after attendance is confirmed.'
+                        : 'Next step: confirm the patient attended. A case can be closed only after attendance is confirmed.'}
+                    </p>
+                  ) : (
                   <form
                     onSubmit={handleDocumentClosure}
                     className="bg-[#F8FAFC] border border-slate-200 rounded-xl p-4 space-y-3"
@@ -1018,11 +1003,13 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                     </div>
                     <button
                       type="submit"
-                      className="w-full py-2.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors cursor-pointer"
+                      disabled={busy}
+                      className="w-full py-2.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
                     >
                       Verify Outcome &amp; Close Case
                     </button>
                   </form>
+                  )}
                 </div>
               )}
             </div>
@@ -1104,12 +1091,12 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                   <label className="block font-semibold text-[#061B3A] mb-1">Pathway</label>
                   <select
                     value={newPathway}
-                    onChange={(e) => setNewPathway(e.target.value as PathwayName)}
+                    onChange={(e) => setNewPathway(e.target.value as PathwayId)}
                     className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg"
                   >
-                    <option value="Cancer Screening">Cancer Screening</option>
-                    <option value="NCD Screening">NCD Screening</option>
-                    <option value="Male Reproductive Health">Male Reproductive Health</option>
+                    <option value="CANCER_SCREENING">{PATHWAY_LABELS.CANCER_SCREENING}</option>
+                    <option value="NCD_SCREENING">{PATHWAY_LABELS.NCD_SCREENING}</option>
+                    <option value="MALE_REPRODUCTIVE_HEALTH">{PATHWAY_LABELS.MALE_REPRODUCTIVE_HEALTH}</option>
                   </select>
                 </div>
                 <div>
@@ -1119,9 +1106,11 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                     onChange={(e) => setNewCoordinator(e.target.value)}
                     className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg"
                   >
-                    <option value="Miriam Wanjiku">Miriam Wanjiku</option>
-                    <option value="Peter Omondi">Peter Omondi</option>
-                    <option value="Amina Salim">Amina Salim</option>
+                    {assignees.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1148,7 +1137,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                   className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg"
                 >
                   {facilities.map((f) => (
-                    <option key={f.id} value={f.name}>
+                    <option key={f.id} value={f.id}>
                       {f.name} ({f.city})
                     </option>
                   ))}
@@ -1187,9 +1176,10 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-lg cursor-pointer"
+                  disabled={newCaseBusy}
+                  className="px-5 py-2 font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 rounded-lg cursor-pointer"
                 >
-                  Create Tracked Case
+                  {newCaseBusy ? 'Creating…' : 'Create Tracked Case'}
                 </button>
               </div>
             </form>
@@ -1213,7 +1203,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                   Phase 1 Secure CSV Batch Intake
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Format: PatientCode, CohortLabel, Pathway, SourceProgram, Owner, Facility
+                  Format: PatientCode, CohortLabel, Pathway, SourceProgram, Owner, Facility [, PatientName]
                 </p>
               </div>
               <button
@@ -1225,17 +1215,69 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               </button>
             </div>
 
-            <form onSubmit={handleCsvImport} className="space-y-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submitCsv(false);
+              }}
+              className="space-y-4"
+            >
               <textarea
                 rows={5}
                 value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
+                onChange={(e) => {
+                  setCsvText(e.target.value);
+                  setCsvResult(null);
+                }}
+                aria-label="CSV rows"
                 className="w-full p-3 font-mono text-xs bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A]"
               />
 
-              {csvFeedback && (
-                <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                  {csvFeedback}
+              <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={csvAttested}
+                  onChange={(e) => setCsvAttested(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-300"
+                />
+                <span>
+                  I confirm our programme holds these patients&apos; consent for SMS follow-up and the right to
+                  share their referral details with the receiving facility.
+                </span>
+              </label>
+
+              {csvError && (
+                <div role="alert" className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
+                  {csvError}
+                </div>
+              )}
+
+              {csvResult && (
+                <div className="space-y-2">
+                  <div
+                    className={`text-xs rounded-lg p-3 border ${
+                      csvResult.rejected === 0
+                        ? 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                        : 'text-amber-900 bg-amber-50 border-amber-200'
+                    }`}
+                  >
+                    {csvResult.dryRun
+                      ? `Check complete: ${csvResult.imported} row${csvResult.imported === 1 ? '' : 's'} ready to import, ${csvResult.rejected} need attention. Nothing was saved.`
+                      : `Imported ${csvResult.imported} case${csvResult.imported === 1 ? '' : 's'} into the active queue${
+                          csvResult.rejected ? `; ${csvResult.rejected} row${csvResult.rejected === 1 ? ' was' : 's were'} not imported.` : '.'
+                        }`}
+                  </div>
+                  {csvResult.rows.some((r) => !r.ok) && (
+                    <ul className="max-h-32 overflow-y-auto text-xs text-red-700 space-y-1">
+                      {csvResult.rows
+                        .filter((r) => !r.ok)
+                        .map((r) => (
+                          <li key={r.line}>
+                            <span className="font-mono">Line {r.line}</span> · {r.patientCode || '(no code)'} — {r.error}
+                          </li>
+                        ))}
+                    </ul>
+                  )}
                 </div>
               )}
 
@@ -1248,10 +1290,20 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                   Cancel
                 </button>
                 <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-semibold text-white bg-[#061B3A] hover:bg-[#0B2954] rounded-lg cursor-pointer"
+                  type="button"
+                  disabled={csvBusy}
+                  onClick={() => void submitCsv(true)}
+                  className="px-4 py-2 text-xs font-semibold text-[#061B3A] border border-slate-200 hover:bg-slate-50 disabled:opacity-60 rounded-lg cursor-pointer"
                 >
-                  Import Batch Referrals
+                  Check Only
+                </button>
+                <button
+                  type="submit"
+                  disabled={csvBusy || !csvAttested}
+                  title={csvAttested ? undefined : 'Confirm consent to enable import'}
+                  className="px-5 py-2 text-xs font-semibold text-white bg-[#061B3A] hover:bg-[#0B2954] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg cursor-pointer"
+                >
+                  {csvBusy ? 'Working…' : 'Import Batch Referrals'}
                 </button>
               </div>
             </form>

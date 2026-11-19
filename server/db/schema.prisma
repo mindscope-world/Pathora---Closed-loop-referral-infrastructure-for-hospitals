@@ -1,0 +1,478 @@
+// Pathora data model. See plan.md §4 for the design rationale.
+//
+// Conventions
+//  - `ReferralCase.stage` is stored; the user-facing `status` (Active / Awaiting Ack /
+//    Overdue SLA / Closed Verified) and `slaHoursRemaining` are DERIVED (Phase 3, sla.ts).
+//  - Milestones are rows, so "sent", "received" and "acknowledged" stay distinct facts.
+//  - AuditEvent and Consent are append-only. AuditEvent is also hash-chained and protected by
+//    a DB trigger (see migrations/*_integrity_constraints).
+//  - Patient name/phone are stored encrypted (AES-256-GCM, see server/lib/crypto.ts).
+
+generator client {
+  provider = "prisma-client"
+  output   = "./generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum OrgType {
+  PROGRAMME
+  FACILITY
+  CLINICAL_PARTNER
+}
+
+enum Role {
+  PROGRAMME_MANAGER
+  PROGRAMME_COORDINATOR
+  FACILITY_FOCAL
+  CLINICAL_LEAD
+  DPO
+}
+
+enum FacilityType {
+  PUBLIC_REFERRAL
+  FAITH_BASED
+  PRIVATE_SPECIALIST
+  COUNTY_DIAGNOSTIC
+}
+
+enum InteropMethod {
+  PORTAL_CSV
+  API_READY
+  STATUS_RETURN_DESK
+}
+
+enum Pathway {
+  CANCER_SCREENING
+  NCD_SCREENING
+  MALE_REPRODUCTIVE_HEALTH
+  MATERNAL_CHILD_HEALTH
+}
+
+enum RulePackStatus {
+  ACTIVE
+  CONFIGURED
+  COMING_SOON
+}
+
+enum Stage {
+  INTAKE
+  ASSIGNED
+  CONTACTED
+  HANDOFF_SENT
+  ACKNOWLEDGED
+  ATTENDED
+  ESCALATED
+  CLOSED
+}
+
+enum MilestoneType {
+  REFERRAL_ISSUED
+  FACILITY_ACKNOWLEDGED
+  PATIENT_ATTENDED
+  EVALUATION_COMPLETED
+  OUTCOME_DOCUMENTED
+}
+
+enum Channel {
+  SMS
+  WHATSAPP
+  VOICE
+}
+
+enum ConsentEvent {
+  /// Consent captured (or declined) at screening / import.
+  CAPTURED
+  /// Patient opted out of automated contact; all channels revoked together.
+  OPTED_OUT
+  /// A prior opt-out was reversed.
+  RESTORED
+}
+
+enum Lang {
+  ENGLISH
+  KISWAHILI
+}
+
+enum DeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  BLOCKED_OPTOUT
+  HUMAN_ROUTED
+}
+
+enum ExportStatus {
+  PENDING
+  RUNNING
+  READY
+  FAILED
+}
+
+// ───────────────────────────── Tenancy & identity ─────────────────────────────
+
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  type          OrgType  @default(PROGRAMME)
+  retentionDays Int      @default(365)
+  dpoContact    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users        User[]
+  facilities   Facility[]
+  patients     Patient[]
+  rulePacks    RulePack[]
+  cases        ReferralCase[]
+  templates    MessageTemplate[]
+  commsLogs    CommsLog[]
+  auditEvents  AuditEvent[]
+  exportJobs   ExportJob[]
+  refSequences RefSequence[]
+}
+
+model User {
+  id           String    @id @default(cuid())
+  orgId        String
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role
+  /// Free-text display affiliation shown in the UI ("Kisumu Community Health Network").
+  affiliation  String?
+  /// Required for FACILITY_FOCAL (enforced by CHECK constraint); null otherwise.
+  facilityId   String?
+  accessScope  String
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org      Organization @relation(fields: [orgId], references: [id])
+  facility Facility?    @relation(fields: [facilityId], references: [id])
+
+  refreshTokens   RefreshToken[]
+  coordinating    ReferralCase[]  @relation("CaseCoordinator")
+  clinicalOwns    RulePack[]
+  recordedMiles   CaseMilestone[]
+  recordedConsent Consent[]
+
+  @@index([orgId, role])
+  @@index([facilityId])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  /// SHA-256 of the opaque token; the token itself is never stored.
+  tokenHash String    @unique
+  /// Rotation family, used to revoke the whole chain if a rotated token is replayed.
+  familyId  String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model Facility {
+  id            String        @id @default(cuid())
+  orgId         String
+  name          String
+  type          FacilityType
+  city          String
+  interopMethod InteropMethod
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  org   Organization   @relation(fields: [orgId], references: [id])
+  users User[]
+  cases ReferralCase[]
+
+  @@unique([orgId, name])
+}
+
+// ───────────────────────────── Patients & consent ─────────────────────────────
+
+model Patient {
+  id          String   @id @default(cuid())
+  orgId       String
+  /// Programme-issued pseudonymous code (e.g. PT-8841). The default identifier shown in the UI.
+  patientCode String
+  /// AES-256-GCM envelope: [version(1) | iv(12) | tag(16) | ciphertext].
+  nameEnc     Bytes
+  phoneEnc    Bytes?
+  /// Non-identifying cohort label ("Cohort NBO · F / 44").
+  label       String
+  /// Keyed-HMAC of each lowercased word of the name (server/lib/searchIndex.ts). Lets us find a
+  /// patient by whole-word name without storing or indexing the plaintext name.
+  nameTokens  String[] @default([])
+  createdAt   DateTime @default(now())
+
+  org     Organization   @relation(fields: [orgId], references: [id])
+  cases   ReferralCase[]
+  consent Consent[]
+
+  @@unique([orgId, patientCode])
+  @@index([nameTokens], type: Gin)
+}
+
+/// Append-only. Current consent for a channel = the latest row for (patientId, channel).
+/// An opt-out is a `granted = false` row.
+model Consent {
+  id           String       @id @default(cuid())
+  patientId    String
+  channel      Channel
+  granted      Boolean
+  event        ConsentEvent @default(CAPTURED)
+  lawfulBasis  String
+  recordedById String?
+  recordedAt   DateTime     @default(now())
+
+  patient    Patient @relation(fields: [patientId], references: [id])
+  recordedBy User?   @relation(fields: [recordedById], references: [id])
+
+  @@index([patientId, channel, recordedAt])
+}
+
+// ───────────────────────────── Pathway rules ─────────────────────────────
+
+/// One row per version. Editing SLAs inserts a new version; open cases stay pinned to theirs.
+model RulePack {
+  id              String         @id @default(cuid())
+  orgId           String
+  /// Stable identifier across versions (e.g. RP-CANCER).
+  key             String
+  pathway         Pathway
+  name            String
+  version         Int
+  status          RulePackStatus
+  ackSlaHours     Int
+  contactSlaHours Int
+  evalTargetDays  Int
+  clinicalOwnerId String?
+  redFlagRule     String
+  closureCriteria String
+  effectiveFrom   DateTime       @default(now())
+  createdAt       DateTime       @default(now())
+
+  org           Organization   @relation(fields: [orgId], references: [id])
+  clinicalOwner User?          @relation(fields: [clinicalOwnerId], references: [id])
+  cases         ReferralCase[]
+
+  @@unique([orgId, key, version])
+  @@index([orgId, pathway])
+}
+
+// ───────────────────────────── Referral cases ─────────────────────────────
+
+model ReferralCase {
+  id            String    @id @default(cuid())
+  /// Human-facing id, e.g. REF-2026-0418. Issued per organisation from RefSequence, so it is
+  /// unique within an organisation (@@unique below), not globally.
+  refNumber     String
+  orgId         String
+  patientId     String
+  pathway       Pathway
+  rulePackId    String
+  sourceProgram String
+  coordinatorId String
+  facilityId    String
+  stage         Stage
+  redFlag       Boolean   @default(false)
+  notes         String    @default("")
+  closureReason String?
+  outcomeSource String?
+  issuedAt      DateTime
+  /// Deadline for the NEXT required action (server/modules/cases/sla.ts): the ack deadline until the
+  /// facility acknowledges, then the evaluation target; reset when a barrier is resolved.
+  slaDueAt      DateTime
+  dueDate       DateTime
+  closedAt      DateTime?
+  /// Excluded from every metric and export (rule-pack synthetic tests, Phase 6).
+  isSynthetic   Boolean   @default(false)
+  /// Optimistic-lock counter; bump on every mutation.
+  version       Int       @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  org         Organization @relation(fields: [orgId], references: [id])
+  patient     Patient      @relation(fields: [patientId], references: [id])
+  rulePack    RulePack     @relation(fields: [rulePackId], references: [id])
+  coordinator User         @relation("CaseCoordinator", fields: [coordinatorId], references: [id])
+  facility    Facility     @relation(fields: [facilityId], references: [id])
+
+  milestones CaseMilestone[]
+  commsLogs  CommsLog[]
+
+  @@unique([orgId, refNumber])
+  @@index([orgId, stage])
+  @@index([orgId, facilityId])
+  @@index([orgId, coordinatorId])
+  @@index([orgId, slaDueAt])
+  @@index([orgId, pathway])
+}
+
+model CaseMilestone {
+  id         String        @id @default(cuid())
+  caseId     String
+  type       MilestoneType
+  occurredAt DateTime
+  recordedBy String?
+  createdAt  DateTime      @default(now())
+
+  case     ReferralCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  recorder User?        @relation(fields: [recordedBy], references: [id])
+
+  @@unique([caseId, type])
+}
+
+/// Per-org, per-year counter behind REF-YYYY-NNNN. Incremented atomically (server/lib/ids.ts).
+model RefSequence {
+  orgId     String
+  year      Int
+  lastValue Int    @default(0)
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@id([orgId, year])
+}
+
+// ───────────────────────────── Communications ─────────────────────────────
+
+model MessageTemplate {
+  id         String    @id @default(cuid())
+  orgId      String
+  name       String
+  /// null = applies to all pathways.
+  pathway    Pathway?
+  channel    Channel
+  language   Lang
+  body       String
+  reviewedBy String
+  /// Only approved templates may be sent.
+  approvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id])
+  commsLogs CommsLog[]
+
+  @@unique([orgId, name])
+}
+
+model CommsLog {
+  id                String         @id @default(cuid())
+  orgId             String
+  caseId            String
+  channel           Channel
+  templateId        String?
+  /// Snapshot of the template name, so the log survives template edits and covers
+  /// non-template actions such as human coordinator calls.
+  templateName      String
+  status            DeliveryStatus
+  providerMessageId String?
+  sentAt            DateTime       @default(now())
+
+  org      Organization     @relation(fields: [orgId], references: [id])
+  case     ReferralCase     @relation(fields: [caseId], references: [id])
+  template MessageTemplate? @relation(fields: [templateId], references: [id])
+
+  @@index([orgId, sentAt])
+  @@index([caseId])
+  @@index([providerMessageId])
+}
+
+// ───────────────────────────── Audit & exports ─────────────────────────────
+
+/// Append-only and hash-chained per organisation:
+///   hash = sha256(prevHash || canonicalJSON(event))   (server/lib/auditHash.ts)
+/// UPDATE / DELETE / TRUNCATE are rejected by a DB trigger.
+model AuditEvent {
+  id           BigInt   @id @default(autoincrement())
+  orgId        String
+  at           DateTime @default(now())
+  actorId      String?
+  /// Display name captured at write time (survives user renames/deactivation).
+  actorLabel   String
+  actorRole    String
+  action       String
+  resourceType String
+  resourceId   String
+  detail       String
+  prevHash     String
+  hash         String
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, id])
+  @@index([orgId, resourceId])
+  @@index([orgId, at])
+}
+
+model ExportJob {
+  id          String       @id @default(cuid())
+  orgId       String
+  type        String
+  requestedBy String
+  status      ExportStatus @default(PENDING)
+  fileKey     String?
+  createdAt   DateTime     @default(now())
+  completedAt DateTime?
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, createdAt])
+}
+
+/// Public "request a walkthrough" submissions (DiscoveryModal). Not tenant-scoped.
+model Lead {
+  id           String    @id @default(cuid())
+  name         String
+  organization String
+  email        String
+  pathway      String
+  createdAt    DateTime  @default(now())
+  handledAt    DateTime?
+
+  @@index([createdAt])
+}
+
+/// Failed sign-in attempts, keyed by a hash of the (normalised) email so unknown and known
+/// accounts throttle identically. Stored in Postgres so the limit holds across server instances.
+model LoginAttempt {
+  id        Int      @id @default(autoincrement())
+  /// sha256(lowercased email)
+  keyHash   String
+  createdAt DateTime @default(now())
+
+  @@index([keyHash, createdAt])
+  @@index([createdAt])
+}
+
+/// Replay protection for create endpoints. A retried POST with the same Idempotency-Key returns the
+/// original response instead of creating a duplicate (server/middleware/idempotency.ts).
+model IdempotencyKey {
+  id           String   @id @default(cuid())
+  orgId        String
+  userId       String
+  key          String
+  /// sha256 of method + path + canonical body; a different body under the same key is rejected.
+  requestHash  String
+  /// null while the first request is still in flight.
+  statusCode   Int?
+  responseBody Json?
+  createdAt    DateTime @default(now())
+
+  @@unique([orgId, userId, key])
+  @@index([createdAt])
+}

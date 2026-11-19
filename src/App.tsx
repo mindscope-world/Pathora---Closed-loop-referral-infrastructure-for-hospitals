@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { WorkflowSplitSection } from './components/WorkflowSplitSection';
@@ -14,12 +14,13 @@ import { DiscoverySection } from './components/DiscoverySection';
 import { Footer } from './components/Footer';
 import { DiscoveryModal } from './components/DiscoveryModal';
 import { DashboardShell } from './components/dashboard/DashboardShell';
-import { LoginPage, AuthUserSession } from './components/auth/LoginPage';
+import { LoginPage } from './components/auth/LoginPage';
+import { useAuth } from './auth/AuthProvider';
 import { SignupPage } from './components/auth/SignupPage';
 
 export default function App() {
   const [viewMode, setViewMode] = useState<'landing' | 'login' | 'signup' | 'dashboard'>('landing');
-  const [currentUser, setCurrentUser] = useState<AuthUserSession | null>(null);
+  const { status, session, signOut } = useAuth();
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const [selectedPathway, setSelectedPathway] = useState<string | undefined>(undefined);
 
@@ -33,15 +34,26 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   };
 
-  const handleAuthSuccess = (user: AuthUserSession) => {
-    setCurrentUser(user);
-    navigateTo('dashboard');
-  };
+  const handleAuthSuccess = () => navigateTo('dashboard');
 
   const handleSignOut = () => {
-    setCurrentUser(null);
+    void signOut();
     navigateTo('landing');
   };
+
+  // A restored session (refresh cookie) goes straight to the dashboard instead of the marketing page.
+  useEffect(() => {
+    if (status === 'authenticated') {
+      setViewMode((mode) => (mode === 'landing' ? 'dashboard' : mode));
+    } else if (status === 'anonymous') {
+      // Session ended (signed out, or a refresh failed mid-use): never leave the dashboard open.
+      setViewMode((mode) => (mode === 'dashboard' ? 'login' : mode));
+    }
+  }, [status]);
+
+  if (status === 'loading') {
+    return <div className="min-h-screen bg-[#F8FAFC]" aria-busy="true" />;
+  }
 
   if (viewMode === 'login') {
     return (
@@ -66,7 +78,7 @@ export default function App() {
   if (viewMode === 'dashboard') {
     return (
       <DashboardShell
-        currentUser={currentUser}
+        currentUser={session}
         onExitDashboard={handleSignOut}
       />
     );

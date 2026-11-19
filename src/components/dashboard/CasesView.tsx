@@ -8,6 +8,9 @@ interface CasesViewProps {
   onSelectCase: (c: ReferralCase) => void;
   onOpenNewCase: () => void;
   onOpenCsvImport: () => void;
+  /** Hide controls the server would reject for this role (the server still enforces). */
+  canCreate?: boolean;
+  canImport?: boolean;
 }
 
 const STATUS_FILTERS: Array<'All' | CaseStatus> = [
@@ -23,6 +26,8 @@ export function CasesView({
   onSelectCase,
   onOpenNewCase,
   onOpenCsvImport,
+  canCreate = true,
+  canImport = true,
 }: CasesViewProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | CaseStatus>('All');
@@ -78,6 +83,7 @@ export function CasesView({
               <option value="Male Reproductive Health">Male Reproductive Health</option>
             </select>
 
+            {canImport && (
             <button
               type="button"
               onClick={onOpenCsvImport}
@@ -86,7 +92,9 @@ export function CasesView({
               <Upload className="w-3.5 h-3.5" />
               <span>Import CSV</span>
             </button>
+            )}
 
+            {canCreate && (
             <button
               type="button"
               onClick={onOpenNewCase}
@@ -95,6 +103,7 @@ export function CasesView({
               <Plus className="w-3.5 h-3.5" />
               <span>Log Positive Screen</span>
             </button>
+            )}
           </div>
         </div>
 
