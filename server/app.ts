@@ -9,7 +9,10 @@ import { logger } from './lib/logger';
 import { requestId } from './middleware/requestId';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { authRouter, type AuthRouterOptions } from './modules/auth/routes';
-import { casesRouter, facilitiesRouter, searchRouter } from './modules/cases/routes';
+import { casesRouter, searchRouter } from './modules/cases/routes';
+import { facilitiesRouter } from './modules/facilities/routes';
+import { organizationRouter } from './modules/organization/routes';
+import { invitesRouter, usersRouter } from './modules/team/routes';
 import { auditRouter } from './modules/audit/routes';
 import { exportsRouter } from './modules/exports/routes';
 import { redactToken } from './modules/exports/signedUrl';
@@ -28,6 +31,7 @@ const healthz: RequestHandler = (_req, res) => {
 
 export interface AppOptions {
   auth?: AuthRouterOptions;
+  invites?: { maxPerIp?: number };
   exports?: {
     /** Called after an export is queued so it starts promptly. Tests replace it to drive the worker by hand. */
     kick?: () => void;
@@ -81,6 +85,9 @@ export function createApp(options: AppOptions = {}): Express {
   api.use('/auth', authRouter(options.auth));
   api.use('/cases', casesRouter());
   api.use('/facilities', facilitiesRouter());
+  api.use('/organization', organizationRouter());
+  api.use('/users', usersRouter());
+  api.use('/invites', invitesRouter({ maxPerIp: options.invites?.maxPerIp }));
   api.use('/search', searchRouter());
   api.use('/audit', auditRouter());
   api.use(

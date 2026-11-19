@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AuthSessionResponse, AuthUserDto } from '../../../shared/types';
+import { ROLE_SCOPES, type AuthSessionResponse, type AuthUserDto } from '../../../shared/types';
 import { prisma } from '../../db/client';
 import type { Prisma } from '../../db/generated/client';
 import { HttpError } from '../../lib/errors';
@@ -51,7 +51,7 @@ export function toUserDto(u: UserWithOrg): AuthUserDto {
 
 const emailKey = (email: string) => createHash('sha256').update(email).digest('hex');
 
-async function issueSession(
+export async function issueSession(
   tx: Prisma.TransactionClient,
   user: UserWithOrg,
   family: { familyId: string; familyStart: Date },
@@ -96,7 +96,7 @@ export async function signup(input: {
           name: input.fullName,
           role: 'PROGRAMME_MANAGER',
           affiliation: input.organization,
-          accessScope: 'Owns programme configuration, referrals, team access and exports',
+          accessScope: ROLE_SCOPES.PROGRAMME_MANAGER,
           lastLoginAt: new Date(),
         },
         include: { org: true },

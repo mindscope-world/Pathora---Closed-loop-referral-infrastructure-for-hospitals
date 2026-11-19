@@ -1,6 +1,5 @@
-import { ROLE_LABELS, PATHWAY_LABELS, type CaseDetailDto, type CaseDto, type CaseListResponse, type FacilityDto, type AssigneeDto, type PathwayId } from '../../../shared/types';
+import { ROLE_LABELS, PATHWAY_LABELS, type CaseDetailDto, type CaseDto, type CaseListResponse, type AssigneeDto, type PathwayId } from '../../../shared/types';
 import { can } from '../../../shared/permissions';
-import { prisma } from '../../db/client';
 import { forOrg, type TenantDb } from '../../db/tenant';
 import type { MilestoneType, Prisma } from '../../db/generated/client';
 import { aad, encryptField } from '../../lib/crypto';
@@ -143,31 +142,6 @@ export async function getCaseDetail(auth: AuthContext, ref: string): Promise<Cas
       })),
     };
   });
-}
-
-export async function listFacilities(auth: AuthContext): Promise<FacilityDto[]> {
-  const db = forOrg(auth.orgId);
-  const facilities = await db.facility.findMany({
-    where: auth.role === 'FACILITY_FOCAL' ? { id: auth.facilityId ?? '__none__' } : undefined,
-    orderBy: { name: 'asc' },
-    include: { users: { where: { role: 'FACILITY_FOCAL', active: true }, select: { name: true }, orderBy: { createdAt: 'asc' }, take: 1 } },
-  });
-
-  // Mean hours from referral issued → facility acknowledged, per facility.
-  const avgs = await prisma.$queryRaw<{ facilityId: string; avg: number }[]>`
-    SELECT c."facilityId", AVG(EXTRACT(EPOCH FROM (a."occurredAt" - i."occurredAt")) / 3600.0)::float AS avg
-    FROM "ReferralCase" c
-    JOIN "CaseMilestone" i ON i."caseId" = c.id AND i.type = 'REFERRAL_ISSUED'
-    JOIN "CaseMilestone" a ON a."caseId" = c.id AND a.type = 'FACILITY_ACKNOWLEDGED'
-    WHERE c."orgId" = ${auth.orgId} AND NOT c."isSynthetic"
-    GROUP BY c."facilityId"`;
-  const avgByFacility = new Map(avgs.map((a) => [a.facilityId, Math.round(a.avg * 10) / 10]));
-
-  return facilities.map((f) => ({
-    id: f.id, name: f.name, type: f.type, city: f.city, interopMethod: f.interopMethod,
-    focalPerson: f.users[0]?.name ?? null,
-    avgAckHours: avgByFacility.get(f.id) ?? null,
-  }));
 }
 
 export async function listAssignees(auth: AuthContext): Promise<AssigneeDto[]> {

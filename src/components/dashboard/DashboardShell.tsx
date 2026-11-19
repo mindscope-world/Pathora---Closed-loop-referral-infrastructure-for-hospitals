@@ -28,9 +28,7 @@ import {
   CommsLogEntry,
   INITIAL_COMMS_LOG,
   INITIAL_RULE_PACKS,
-  INITIAL_TEAM,
   PathwayRulePack,
-  TeamMember,
 } from '../../data/dashboardData';
 import { OverviewView } from './OverviewView';
 import { CasesView } from './CasesView';
@@ -39,7 +37,7 @@ import { EscalationsView } from './EscalationsView';
 import { CommsConsentView } from './CommsConsentView';
 import { PathwaysView } from './PathwaysView';
 import { AuditView } from './AuditView';
-import { SettingsView } from './AuditSettingsViews';
+import { SettingsView } from './SettingsView';
 import { ReferralProgressTracker, deriveReferralJourney } from './ReferralProgressTracker';
 
 export type DashboardTab =
@@ -78,11 +76,10 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   const ws = useWorkspace(role);
   const { cases, facilities, assignees } = ws;
 
-  // Still demo data until their phases land: comms log (Phase 7), rule packs (Phase 6) and team (Phase 5).
+  // Still demo data until their phases land: comms log (Phase 7) and rule packs (Phase 6).
   // (The audit trail is real: the server records every action itself; see AuditView.)
   const [commsLog, setCommsLog] = useState<CommsLogEntry[]>(INITIAL_COMMS_LOG);
   const [rulePacks, setRulePacks] = useState<PathwayRulePack[]>(INITIAL_RULE_PACKS);
-  const [team, setTeam] = useState<TeamMember[]>(INITIAL_TEAM);
 
   // Global Header Search State
   const [globalQuery, setGlobalQuery] = useState('');
@@ -656,6 +653,8 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               onSelectCase={(c) => setSelectedCaseId(c.id)}
               canAcknowledge={allowed('cases.acknowledge')}
               canConfirmAttendance={allowed('cases.attend')}
+              canManage={allowed('facilities.manage')}
+              onFacilitiesChanged={() => void ws.reload(true)}
             />
           )}
           {activeTab === 'escalations' && (
@@ -688,20 +687,11 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           )}
           {activeTab === 'settings' && (
             <SettingsView
-              team={team}
-              onToggleMemberActive={(id) =>
-                setTeam((prev) =>
-                  prev.map((m) => (m.id === id ? { ...m, active: !m.active } : m))
-                )
-              }
-              onAddTeamMember={(member) => {
-                const newMember: TeamMember = {
-                  ...member,
-                  id: `USR-0${team.length + 1}`,
-                  active: true,
-                };
-                setTeam((prev) => [...prev, newMember]);
-              }}
+              currentUserId={user?.id ?? ''}
+              canManageOrg={allowed('org.manage')}
+              canReadTeam={allowed('team.read')}
+              canManageTeam={allowed('team.manage')}
+              facilities={facilities}
             />
           )}
             </>

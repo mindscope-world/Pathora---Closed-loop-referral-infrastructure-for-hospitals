@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ROLE_LABELS, type AuthSessionResponse, type AuthUserDto, type LoginRequest, type SignupRequest } from '../../shared/types';
+import { ROLE_LABELS, type AcceptInviteRequest, type AuthSessionResponse, type AuthUserDto, type LoginRequest, type SignupRequest } from '../../shared/types';
 import { authApi, refreshSession, setAccessToken, setSessionLostHandler } from '../lib/api';
 
 /** The shape the dashboard has always consumed (display strings). Derived from the real user. */
@@ -21,6 +21,8 @@ interface AuthContextValue {
   session: AuthUserSession | null;
   signIn: (req: LoginRequest) => Promise<void>;
   signUp: (req: SignupRequest) => Promise<void>;
+  /** Joins an organisation from an invitation link and signs the new member in. */
+  acceptInvite: (req: AcceptInviteRequest) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -55,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async (req: LoginRequest) => apply(await authApi<AuthSessionResponse>('/auth/login', req)), [apply]);
   const signUp = useCallback(async (req: SignupRequest) => apply(await authApi<AuthSessionResponse>('/auth/signup', req)), [apply]);
+  const acceptInvite = useCallback(async (req: AcceptInviteRequest) => apply(await authApi<AuthSessionResponse>('/invites/accept', req)), [apply]);
   const signOut = useCallback(async () => {
     try {
       await authApi('/auth/logout');
@@ -65,8 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [apply]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, session: user ? toSession(user) : null, signIn, signUp, signOut }),
-    [status, user, signIn, signUp, signOut],
+    () => ({ status, user, session: user ? toSession(user) : null, signIn, signUp, acceptInvite, signOut }),
+    [status, user, signIn, signUp, acceptInvite, signOut],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

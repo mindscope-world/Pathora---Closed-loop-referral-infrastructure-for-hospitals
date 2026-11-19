@@ -83,16 +83,6 @@ export function casesRouter(): Router {
   return r;
 }
 
-/** Reference data the dashboard needs alongside cases. */
-export function facilitiesRouter(): Router {
-  const r = Router();
-  r.get('/', authenticate, requirePermission('facilities.read'), asyncHandler(async (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ facilities: await svc.listFacilities(req.auth!) });
-  }));
-  return r;
-}
-
 export function searchRouter(): Router {
   const r = Router();
   r.get('/', authenticate, requirePermission('cases.read'), asyncHandler(async (req, res) => {

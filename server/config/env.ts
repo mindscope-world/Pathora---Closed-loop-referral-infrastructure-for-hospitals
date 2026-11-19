@@ -22,6 +22,10 @@ const schema = z.object({
   // Where generated export files are kept (local disk; swap for object storage in production).
   EXPORT_DIR: z.string().min(1).default('.data/exports'),
 
+  // Outgoing email (team invitations). Without SMTP_URL no email is sent and the inviter shares the link.
+  SMTP_URL: z.string().url().optional(),
+  MAIL_FROM: z.string().min(3).default('Pathora <no-reply@pathora.example>'),
+
   // Messaging provider (used from Phase 7). 'mock' needs no credentials.
   MESSAGING_PROVIDER: z.enum(['mock', 'africastalking']).default('mock'),
   AT_USERNAME: z.string().optional(),

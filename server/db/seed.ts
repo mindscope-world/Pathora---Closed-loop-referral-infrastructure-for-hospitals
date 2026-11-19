@@ -8,6 +8,7 @@
  * Every user gets the same demo password (SEED_PASSWORD, default below). Never run in production.
  */
 import { hash } from 'argon2';
+import { ROLE_SCOPES } from '../../shared/types';
 import { env } from '../config/env';
 import { aad, encryptField } from '../lib/crypto';
 import { nameTokens } from '../lib/searchIndex';
@@ -111,6 +112,7 @@ async function main() {
     { name: 'Dr. Daniel Kiprop', role: 'FACILITY_FOCAL', affiliation: 'St. Luke Mission Diagnostic Centre', accessScope: 'Acknowledges incoming referrals & returns outcome status', facility: facilityFocals['Dr. Daniel Kiprop'] },
     { name: 'Grace Atieno, RN', role: 'FACILITY_FOCAL', affiliation: 'Kisumu County Specialty Clinic', accessScope: 'Acknowledges incoming referrals & returns outcome status', facility: facilityFocals['Grace Atieno, RN'] },
     { name: 'Dr. Hassan Bakari', role: 'FACILITY_FOCAL', affiliation: 'Pwani Regional Care Hospital', accessScope: 'Acknowledges incoming referrals & returns outcome status', facility: facilityFocals['Dr. Hassan Bakari'] },
+    { name: 'Joyce Wairimu', role: 'PROGRAMME_MANAGER', affiliation: 'Nairobi Screening Programme', accessScope: ROLE_SCOPES.PROGRAMME_MANAGER },
     { name: 'Dr. Samuel Korir', role: 'CLINICAL_LEAD', affiliation: 'Partner Clinical Governance', accessScope: 'Approves pathway rules, red flags & closure criteria' },
   ];
   for (const e of extras) if (!users.some((u) => u.name === e.name)) users.push(e);
@@ -268,7 +270,8 @@ async function main() {
   ]);
   console.log(`Seeded org ${result.orgId}`);
   console.log(`  users=${counts[0]} facilities=${counts[1]} cases=${counts[2]} patients=${counts[3]} consent=${counts[4]} milestones=${counts[5]} comms=${counts[6]} audit=${counts[7]}`);
-  console.log(`  Demo login: ${slug('Miriam Wanjiku')}@${EMAIL_DOMAIN}  /  ${DEMO_PASSWORD}`);
+  console.log(`  Demo login (coordinator): ${slug('Miriam Wanjiku')}@${EMAIL_DOMAIN}  /  ${DEMO_PASSWORD}`);
+  console.log(`  Demo login (manager, can invite/edit settings): ${slug('Joyce Wairimu')}@${EMAIL_DOMAIN}  /  same password`);
 }
 
 main()

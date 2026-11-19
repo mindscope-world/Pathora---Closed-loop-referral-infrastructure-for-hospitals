@@ -145,6 +145,7 @@ model Organization {
   auditEvents  AuditEvent[]
   exportJobs   ExportJob[]
   refSequences RefSequence[]
+  invites      Invite[]
 }
 
 model User {
@@ -172,6 +173,7 @@ model User {
   clinicalOwns    RulePack[]
   recordedMiles   CaseMilestone[]
   recordedConsent Consent[]
+  invitesSent     Invite[]        @relation("InviteInviter")
 
   @@index([orgId, role])
   @@index([facilityId])
@@ -204,9 +206,10 @@ model Facility {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  org   Organization   @relation(fields: [orgId], references: [id])
-  users User[]
-  cases ReferralCase[]
+  org     Organization   @relation(fields: [orgId], references: [id])
+  users   User[]
+  cases   ReferralCase[]
+  invites Invite[]
 
   @@unique([orgId, name])
 }
@@ -501,4 +504,32 @@ model IdempotencyKey {
 
   @@unique([orgId, userId, key])
   @@index([createdAt])
+}
+
+/// An offer to join an organisation. The invitee follows a single-use link and sets their own password,
+/// so nobody ever chooses a password on someone else's behalf. Only a hash of the token is stored.
+model Invite {
+  id          String    @id @default(cuid())
+  orgId       String
+  /// Lowercased.
+  email       String
+  /// Display name the inviter typed; the invitee may correct it when accepting.
+  name        String
+  role        Role
+  /// Required for FACILITY_FOCAL (CHECK constraint).
+  facilityId  String?
+  invitedById String
+  /// sha256 of the opaque token.
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id])
+  invitedBy User         @relation("InviteInviter", fields: [invitedById], references: [id])
+  facility  Facility?    @relation(fields: [facilityId], references: [id])
+
+  @@index([orgId, createdAt])
+  @@index([orgId, email])
 }

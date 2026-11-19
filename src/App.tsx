@@ -17,9 +17,19 @@ import { DashboardShell } from './components/dashboard/DashboardShell';
 import { LoginPage } from './components/auth/LoginPage';
 import { useAuth } from './auth/AuthProvider';
 import { SignupPage } from './components/auth/SignupPage';
+import { AcceptInvitePage } from './components/auth/AcceptInvitePage';
 
 export default function App() {
-  const [viewMode, setViewMode] = useState<'landing' | 'login' | 'signup' | 'dashboard'>('landing');
+  // An invitation link (…/?invite=TOKEN) opens the accept-invitation page. The token is moved into
+  // memory and removed from the address bar immediately, so it does not linger in history or referrers.
+  const [inviteToken, setInviteToken] = useState<string | null>(() => new URLSearchParams(window.location.search).get('invite'));
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('invite')) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
+
+  const [viewMode, setViewMode] = useState<'landing' | 'login' | 'signup' | 'invite' | 'dashboard'>(inviteToken ? 'invite' : 'landing');
   const { status, session, signOut } = useAuth();
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const [selectedPathway, setSelectedPathway] = useState<string | undefined>(undefined);
@@ -29,12 +39,15 @@ export default function App() {
     setDiscoveryOpen(true);
   };
 
-  const navigateTo = (mode: 'landing' | 'login' | 'signup' | 'dashboard') => {
+  const navigateTo = (mode: 'landing' | 'login' | 'signup' | 'invite' | 'dashboard') => {
     setViewMode(mode);
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   };
 
-  const handleAuthSuccess = () => navigateTo('dashboard');
+  const handleAuthSuccess = () => {
+    setInviteToken(null);
+    navigateTo('dashboard');
+  };
 
   const handleSignOut = () => {
     void signOut();
@@ -53,6 +66,19 @@ export default function App() {
 
   if (status === 'loading') {
     return <div className="min-h-screen bg-[#F8FAFC]" aria-busy="true" />;
+  }
+
+  if (viewMode === 'invite' && inviteToken) {
+    return (
+      <AcceptInvitePage
+        token={inviteToken}
+        onSuccess={handleAuthSuccess}
+        onBackToSite={() => {
+          setInviteToken(null);
+          navigateTo('landing');
+        }}
+      />
+    );
   }
 
   if (viewMode === 'login') {
