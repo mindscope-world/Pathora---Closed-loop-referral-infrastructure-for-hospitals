@@ -62,6 +62,19 @@ describe('retention purge', () => {
     expect(ev.detail).not.toContain('Old Closed');
   });
 
+  it('never erases someone with an OPEN referral, even if that referral carries a stale closure date', async () => {
+    // Defence in depth: an open referral should never have a closedAt, but if data were ever inconsistent that way the
+    // purge must still trust the stage, not the date, because erasing a live follow-up is not recoverable.
+    const w = await makeWorkspace();
+    await prisma.organization.update({ where: { id: w.orgId }, data: { retentionDays: 90 } });
+    const open = await createCase(w, { patientName: 'Open With Stale Date' });
+    await prisma.referralCase.updateMany({ where: { orgId: w.orgId, refNumber: open.id }, data: { closedAt: new Date(Date.now() - 400 * DAY) } });
+    expect(await prisma.referralCase.findFirstOrThrow({ where: { orgId: w.orgId, refNumber: open.id } })).toMatchObject({ stage: 'HANDOFF_SENT' });
+
+    expect((await purge(w)).patientsErased).toBe(0);
+    expect(await erased(open.patientCode, w)).toBe(false);
+  });
+
   it('a person with one old closed referral and one recent one is kept (the newest decides)', async () => {
     const w = await makeWorkspace();
     await prisma.organization.update({ where: { id: w.orgId }, data: { retentionDays: 90 } });
