@@ -49,6 +49,8 @@ export const PERMISSIONS = {
   'metrics.read': ALL,
   // Facility system credentials (API keys) for status-return and referral pull.
   'integrations.manage': [MANAGER],
+  // Data subject requests: look up everything held about a person, or erase their personal data.
+  'privacy.manage': [DPO],
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

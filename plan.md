@@ -512,6 +512,35 @@ The landing copy promises "secure CSV now, partner EMR APIs and FHIR later".
 3. **Observability:** pino JSON logs without PII, OpenTelemetry traces, and metrics for queue depth, SLA job lag and send failures.
 4. **Deployment:** Dockerfile (multi-stage), the server serves the built `dist/` in production (Express static plus SPA fallback), and CI running lint, tests, migration check and build. The `APP_URL` placeholder indicates a Cloud Run target. Use a managed Postgres with PITR and a Kenyan or compliant region.
 
+#### Phase 11 as built
+
+- **Deployment.** The server serves the built frontend (`STATIC_DIR`, default `dist` in production) with an SPA fallback that
+  never swallows the API, missing assets, dot-paths or non-GET requests; fingerprinted assets are cached for a year,
+  `index.html` never. Multi-stage `Dockerfile` with two targets: `runtime` (production dependencies only, non-root user,
+  healthcheck) and `migrate` (`prisma migrate deploy`, run as a release step first). `.github/workflows/ci.yml` type-checks,
+  applies migrations to a fresh database and fails if `schema.prisma` drifts from them, runs the tests, builds both
+  targets, audits dependencies, and smoke-tests that the image refuses placeholder secrets. `/readyz` checks the database.
+- **Security.** Strict CSP (script-src `'self'` only, no eval, `frame-ancestors 'none'`), no-referrer, HSTS; production refuses to start
+  on placeholder or reused secrets or a non-https `APP_URL`; any variable can come from a secret-manager mount via `NAME_FILE`.
+  `docs/security-checklist.md`: OWASP Top 10 mapped to real controls, known gaps stated plainly, and a pen-test checklist.
+- **Data protection.** `Patient.erasedAt` and one erasure routine used by both the DPO tools and an hourly **retention job**
+  (`retentionDays` per organisation; erases a person once EVERY referral has been closed longer than the window). Erasure removes
+  name, phone and its hash, search tokens, label, referral notes and closure narrative, and sent-message text; it keeps the
+  pseudonymous code, referral rows and times (statistics), consent history and the **whole audit trail**, which was designed to
+  hold no names or numbers and so never has to be altered: the hash chain stays valid. `GET/POST /api/privacy/patients/:code/export|erasure`
+  (DPO only, audited, erasure refused while a referral is open, idempotent and race-safe). The job also clears stale login-throttle and
+  replay-key rows. `docs/dpia.md` is a DRAFT with the decisions only people can make marked.
+- **Observability.** Logs redact credentials and patient fields and scrub phone numbers and emails out of error text. `GET /metrics`
+  (Prometheus format, bearer `METRICS_TOKEN`, absent when unset): HTTP counts and latency by route TEMPLATE (identifiers are normalised
+  out of labels), per-job runs, errors and lag-since-last-success (SLA monitor, message worker, exports, report scheduler, retention),
+  and queue depth, send lag, failed and human-routed messages, SLA breaches, late schedules. No organisation, person or referral appears.
+- **Backups.** `scripts/backup-restore-drill.sh` dumps, restores into a scratch database, compares row counts, re-verifies every
+  organisation's audit chain in the RESTORED copy (`scripts/verify-audit-chain.ts`, timezone-independent, exit 1 on a break), and cleans up.
+  `docs/operations.md` covers deploy, configuration, alerts, the drill, data-subject requests and the post-restore re-erasure step.
+- **Not built:** OpenTelemetry **traces** (logs and metrics only; needs a collector to verify), MFA, a WAF or CAPTCHA, a secret-manager
+  integration beyond `*_FILE`, object-storage exports (local disk behind a `FileStore` interface), `FIELD_ENCRYPTION_KEY` rotation tooling,
+  an actual penetration test, and the hosting decisions (region, encryption at rest, PITR, backup retention) that the DPIA marks for people.
+
 ---
 
 ## 6. API summary (v1)

@@ -4,6 +4,7 @@ import { logger } from './lib/logger';
 import { startExportWorker } from './jobs/exportWorker';
 import { startSlaMonitor } from './jobs/slaMonitor';
 import { startMessageWorker } from './jobs/messageWorker';
+import { startRetentionPurge } from './jobs/retentionPurge';
 import { startReportScheduler } from './jobs/reportScheduler';
 
 const app = createApp();
@@ -14,6 +15,7 @@ const stopExportWorker = startExportWorker();
 const stopSlaMonitor = startSlaMonitor();
 const stopMessageWorker = startMessageWorker();
 const stopReportScheduler = startReportScheduler();
+const stopRetentionPurge = startRetentionPurge();
 
 let shuttingDown = false;
 function shutdown(signal: string) {
@@ -24,6 +26,7 @@ function shutdown(signal: string) {
   stopSlaMonitor();
   stopMessageWorker();
   stopReportScheduler();
+  stopRetentionPurge();
   server.close((err) => {
     if (err) {
       logger.error({ err }, 'Error during shutdown');

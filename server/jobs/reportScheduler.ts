@@ -1,6 +1,7 @@
 import { can } from '../../shared/permissions';
 import { EXPORT_LABELS, ROLE_LABELS } from '../../shared/types';
 import { prisma } from '../db/client';
+import { recordJobRun } from '../lib/metrics';
 import { logger } from '../lib/logger';
 import { compactStamp } from '../lib/time';
 import { appendAudit } from '../modules/audit/append';
@@ -81,7 +82,9 @@ export function startReportScheduler(intervalSeconds = 60): () => void {
     running = true;
     try {
       await runReportScheduler();
+      recordJobRun('report_scheduler', true);
     } catch (err) {
+      recordJobRun('report_scheduler', false);
       logger.error({ err }, 'Report scheduler tick failed');
     } finally {
       running = false;
