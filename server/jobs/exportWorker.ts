@@ -1,6 +1,7 @@
 import { CSV_BOM } from '../lib/csv';
 import { EXPORT_LABELS, ROLE_LABELS, type ExportType } from '../../shared/types';
 import { prisma } from '../db/client';
+import { recordJobRun } from '../lib/metrics';
 import { logger } from '../lib/logger';
 import { getFileStore } from '../storage/fileStore';
 import { appendAudit } from '../modules/audit/append';
@@ -128,7 +129,9 @@ export function startExportWorker(): () => void {
       await recoverStaleJobs();
       await processPending();
       if (tick++ % 12 === 0) await expireOldExports(); // roughly once a minute
+      recordJobRun('export_worker', true);
     } catch (err) {
+      recordJobRun('export_worker', false);
       logger.error({ err }, 'Export worker tick failed');
     } finally {
       running = false;

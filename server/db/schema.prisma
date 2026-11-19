@@ -263,6 +263,9 @@ model Patient {
   /// STOP be matched to the patient, in every organisation that messaged that number, without keeping it in the clear.
   phoneHash   String?
   createdAt   DateTime @default(now())
+  /// Set when the person's personal data was erased (on request, or by the retention job). The row stays so referral
+  /// history, consent history and the audit trail keep their references; name, phone and free text are gone.
+  erasedAt    DateTime?
 
   org       Organization     @relation(fields: [orgId], references: [id])
   cases     ReferralCase[]
@@ -271,6 +274,7 @@ model Patient {
   inbound   InboundMessage[]
 
   @@unique([orgId, patientCode])
+  @@index([orgId, erasedAt])
   @@index([nameTokens], type: Gin)
   @@index([phoneHash])
 }

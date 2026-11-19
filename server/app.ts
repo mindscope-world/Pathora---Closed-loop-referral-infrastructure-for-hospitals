@@ -4,9 +4,13 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { pinoHttp } from 'pino-http';
 import type { HealthResponse } from '../shared/types';
-import { env } from './config/env';
+import { env, isProd } from './config/env';
 import { logger } from './lib/logger';
 import { requestId } from './middleware/requestId';
+import { staticSite } from './middleware/staticSite';
+import { observeRequest, routeLabel } from './lib/metrics';
+import { opsRouter } from './modules/ops/routes';
+import { privacyRouter } from './modules/privacy/routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { authRouter, type AuthRouterOptions } from './modules/auth/routes';
 import { casesRouter, escalationsRouter, searchRouter } from './modules/cases/routes';
@@ -43,6 +47,8 @@ export interface AppOptions {
   invites?: { maxPerIp?: number };
   leads?: { maxPerIp?: number };
   integrations?: { maxFailedPerIp?: number; maxPerKey?: number };
+  /** Folder holding the built frontend. Defaults to STATIC_DIR, or ./dist in production; none in development/tests. */
+  staticDir?: string;
   messages?: {
     /** Called after a message is queued so it goes out promptly. Tests replace it to drive the worker by hand. */
     kick?: () => void;
@@ -62,6 +68,15 @@ export function createApp(options: AppOptions = {}): Express {
   app.set('trust proxy', 1);
 
   app.use(requestId);
+  // Traffic metrics. The route label is the matched TEMPLATE (e.g. /api/cases/:ref/acknowledge), never the real URL, so
+  // referral numbers and other identifiers cannot reach the metrics; unmatched paths share one label.
+  app.use((req, res, next) => {
+    const start = process.hrtime.bigint();
+    res.on('finish', () => {
+      observeRequest(req.method, routeLabel(req), res.statusCode, Number(process.hrtime.bigint() - start) / 1e9);
+    });
+    next();
+  });
   app.use(
     pinoHttp({
       logger,
@@ -77,7 +92,29 @@ export function createApp(options: AppOptions = {}): Express {
       autoLogging: { ignore: (req) => req.url === '/healthz' || req.url === '/api/healthz' },
     }),
   );
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          // React and the animation library set inline style attributes; fonts come from Google Fonts (index.html).
+          styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+          fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+          imgSrc: ["'self'", 'data:'],
+          connectSrc: ["'self'"],
+          frameAncestors: ["'none'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+          ...(isProd ? { upgradeInsecureRequests: [] } : {}),
+        },
+      },
+      // Patient data pages must not be embedded or sniffed; HSTS applies once served over https.
+      referrerPolicy: { policy: 'no-referrer' },
+    }),
+  );
   app.use(
     cors({
       // Requests with no Origin (curl, server-to-server, same-origin GET) are allowed through;
@@ -96,6 +133,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(cookieParser(env.COOKIE_SECRET));
 
   app.get('/healthz', healthz);
+  app.use(opsRouter()); // /readyz and /metrics
 
   const api = Router();
   api.get('/healthz', healthz);
@@ -116,6 +154,7 @@ export function createApp(options: AppOptions = {}): Express {
   api.use('/rule-packs', rulePacksRouter());
   api.use('/notifications', notificationsRouter());
   api.use('/audit', auditRouter());
+  api.use('/privacy', privacyRouter());
   api.use('/leads', leadsRouter({ maxPerIp: options.leads?.maxPerIp }));
   api.use('/metrics', metricsRouter());
   api.use('/report-schedules', reportSchedulesRouter());
@@ -129,6 +168,12 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/api', api);
   app.use('/api', notFoundHandler);
 
+  const staticDir = options.staticDir ?? env.STATIC_DIR ?? (isProd ? 'dist' : undefined);
+  if (staticDir) {
+    const site = staticSite(staticDir);
+    if (site) app.use(site);
+    else logger.warn({ staticDir }, 'No built frontend found; only the API is being served');
+  }
   app.use(notFoundHandler);
   app.use(errorHandler);
   return app;

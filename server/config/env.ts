@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 
 const base64Key32 = z
@@ -7,7 +8,7 @@ const base64Key32 = z
     message: 'must be a base64-encoded 32-byte key (generate: openssl rand -base64 32)',
   });
 
-const schema = z.object({
+export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -39,9 +40,26 @@ const schema = z.object({
   /** Shared secret the provider puts on webhook URLs (?secret=…). Webhooks are disabled without it. */
   MESSAGING_WEBHOOK_SECRET: z.string().min(24, 'must be at least 24 characters').optional(),
 
+  // Production: serve the built frontend from this folder (single deployable). Default: ./dist when NODE_ENV=production.
+  STATIC_DIR: z.string().min(1).optional(),
+  // Enables GET /metrics (Prometheus format) for a scraper that presents this bearer token. Unset = endpoint disabled.
+  METRICS_TOKEN: z.string().min(24, 'must be at least 24 characters').optional(),
+
   // Optional server-side Gemini key (Phase 9).
   GEMINI_API_KEY: z.string().optional(),
 }).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production') {
+    // Never run production on the example values or in the clear.
+    for (const key of ['JWT_SECRET', 'COOKIE_SECRET', 'FIELD_ENCRYPTION_KEY'] as const) {
+      // The encryption key is base64: look at what it decodes to, since the encoded text would hide a placeholder.
+      const text = key === 'FIELD_ENCRYPTION_KEY' ? Buffer.from(env[key], 'base64').toString('latin1') : env[key];
+      if (/replace-me|changeme|example|password/i.test(text)) {
+        ctx.addIssue({ code: 'custom', path: [key], message: 'still has a placeholder value; generate a real secret' });
+      }
+    }
+    if (env.JWT_SECRET === env.COOKIE_SECRET) ctx.addIssue({ code: 'custom', path: ['COOKIE_SECRET'], message: 'must differ from JWT_SECRET' });
+    if (!env.APP_URL.startsWith('https://')) ctx.addIssue({ code: 'custom', path: ['APP_URL'], message: 'must be https in production (cookies and HSTS depend on it)' });
+  }
   if (env.MESSAGING_PROVIDER === 'africastalking') {
     for (const key of ['AT_USERNAME', 'AT_API_KEY', 'MESSAGING_WEBHOOK_SECRET'] as const) {
       if (!env[key]) {
@@ -51,10 +69,30 @@ const schema = z.object({
   }
 });
 
-export type Env = z.infer<typeof schema>;
+export type Env = z.infer<typeof envSchema>;
+
+/**
+ * Secret managers (Cloud Run, Kubernetes, Docker secrets) mount secrets as files. For any `NAME_FILE=/path`, the file's
+ * contents become `NAME` (unless NAME is already set), so secrets never have to sit in the process environment or an image.
+ */
+export function withSecretFiles(source: NodeJS.ProcessEnv, read: (path: string) => string = (p) => readFileSync(p, 'utf8')): NodeJS.ProcessEnv {
+  const out = { ...source };
+  for (const [key, path] of Object.entries(source)) {
+    if (!key.endsWith('_FILE') || !path) continue;
+    const name = key.slice(0, -5);
+    if (out[name]) continue;
+    try {
+      out[name] = read(path).trim();
+    } catch {
+      console.error(`Could not read the secret file for ${name} (${key}).`);
+      process.exit(1);
+    }
+  }
+  return out;
+}
 
 function load(): Env {
-  const parsed = schema.safeParse(process.env);
+  const parsed = envSchema.safeParse(withSecretFiles(process.env));
   if (!parsed.success) {
     const lines = parsed.error.issues.map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`);
     // Deliberately avoid printing values: they may be secrets.

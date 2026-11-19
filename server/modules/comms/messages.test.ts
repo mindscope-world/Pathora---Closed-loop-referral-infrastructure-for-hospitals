@@ -298,7 +298,8 @@ describe('other rules', () => {
     const post = () => request(app).post(`/api/cases/${c.id}/messages`).set(as(ws.coordinator)).set('Idempotency-Key', `msg-key-${c.id}`).send({ templateId: tpl.id, channel: 'SMS' });
     const [a, b] = [await post().expect(202), await post().expect(202)];
     expect(b.body.entry.id).toBe(a.body.entry.id);
-    expect(await prisma.commsLog.count({ where: { case: { refNumber: c.id } } })).toBe(1);
+    // Reference numbers repeat across organisations, so the count must be scoped to this one.
+    expect(await prisma.commsLog.count({ where: { case: { orgId: ws.orgId, refNumber: c.id } } })).toBe(1);
   });
 
   it('only a manager or coordinator may send, within their own organisation', async () => {

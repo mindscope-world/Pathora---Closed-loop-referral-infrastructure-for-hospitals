@@ -3,6 +3,7 @@ import { prisma } from '../db/client';
 import type { CommsLog, Prisma } from '../db/generated/client';
 import { decryptField, aad } from '../lib/crypto';
 import { clock } from '../lib/clock';
+import { recordJobRun } from '../lib/metrics';
 import { logger } from '../lib/logger';
 import { maskPhone } from '../lib/phone';
 import { MESSAGING_ACTOR } from '../lib/systemActor';
@@ -170,7 +171,9 @@ export function startMessageWorker(): () => void {
     try {
       await recoverStale();
       await processDue();
+      recordJobRun('message_worker', true);
     } catch (err) {
+      recordJobRun('message_worker', false);
       logger.error({ err }, 'Message worker tick failed');
     } finally {
       running = false;

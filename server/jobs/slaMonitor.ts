@@ -2,6 +2,7 @@ import { Prisma } from '../db/generated/client';
 import { env } from '../config/env';
 import { prisma } from '../db/client';
 import { HttpError } from '../lib/errors';
+import { recordJobRun } from '../lib/metrics';
 import { logger } from '../lib/logger';
 import { SYSTEM_ACTOR } from '../lib/systemActor';
 import { getMailer, notificationEmail } from '../lib/mailer';
@@ -238,7 +239,9 @@ export function startSlaMonitor(intervalSeconds = Number(process.env.SLA_MONITOR
     running = true;
     try {
       await runSlaMonitor();
+      recordJobRun('sla_monitor', true);
     } catch (err) {
+      recordJobRun('sla_monitor', false);
       logger.error({ err }, 'SLA monitor run failed');
     } finally {
       running = false;
