@@ -170,6 +170,7 @@ model Organization {
   slaBreaches     SlaBreach[]
   notifications   Notification[]
   reportSchedules ReportSchedule[]
+  facilityApiKeys FacilityApiKey[]
   inboundMessages InboundMessage[]
 }
 
@@ -201,6 +202,7 @@ model User {
   invitesSent     Invite[]        @relation("InviteInviter")
   notifications   Notification[]
   reportSchedules ReportSchedule[]
+  apiKeysCreated  FacilityApiKey[]
 
   @@index([orgId, role])
   @@index([facilityId])
@@ -237,6 +239,7 @@ model Facility {
   users   User[]
   cases   ReferralCase[]
   invites Invite[]
+  apiKeys FacilityApiKey[]
 
   @@unique([orgId, name])
 }
@@ -674,4 +677,34 @@ model ReportSchedule {
 
   @@index([enabled, nextRunAt])
   @@index([orgId])
+}
+
+/// Credentials a receiving facility's system uses to return status (acknowledge / attended / outcome) and to pull
+/// its referrals. The secret is shown once and only its SHA-256 is kept (it is 256 random bits, so a fast hash is
+/// appropriate). A separate signing secret, stored encrypted, lets us verify that a callback body was not altered.
+model FacilityApiKey {
+  id            String    @id @default(cuid())
+  orgId         String
+  facilityId    String
+  /// Human label ("Kenyatta EMR integration").
+  name          String
+  /// Public part of the key (`pk_<keyId>.<secret>`): used to find the row.
+  keyId         String    @unique
+  /// sha256 hex of the secret part.
+  secretHash    String
+  /// AES-256-GCM envelope of the HMAC signing secret.
+  signingSecretEnc Bytes
+  /// referrals:read, referrals:identify (adds the patient's name), status:write
+  scopes        String[]
+  createdById   String
+  createdAt     DateTime  @default(now())
+  lastUsedAt    DateTime?
+  expiresAt     DateTime?
+  revokedAt     DateTime?
+
+  org       Organization @relation(fields: [orgId], references: [id])
+  facility  Facility     @relation(fields: [facilityId], references: [id])
+  createdBy User         @relation(fields: [createdById], references: [id])
+
+  @@index([orgId, facilityId])
 }

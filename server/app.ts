@@ -19,6 +19,8 @@ import { kickMessageWorker } from './jobs/messageWorker';
 import { invitesRouter, usersRouter } from './modules/team/routes';
 import { auditRouter } from './modules/audit/routes';
 import { exportsRouter } from './modules/exports/routes';
+import { apiKeysRouter } from './modules/integrations/keyRoutes';
+import { integrationsRouter } from './modules/integrations/routes';
 import { leadsRouter } from './modules/leads/routes';
 import { metricsRouter } from './modules/metrics/routes';
 import { reportSchedulesRouter } from './modules/reports/routes';
@@ -40,6 +42,7 @@ export interface AppOptions {
   auth?: AuthRouterOptions;
   invites?: { maxPerIp?: number };
   leads?: { maxPerIp?: number };
+  integrations?: { maxFailedPerIp?: number; maxPerKey?: number };
   messages?: {
     /** Called after a message is queued so it goes out promptly. Tests replace it to drive the worker by hand. */
     kick?: () => void;
@@ -87,6 +90,8 @@ export function createApp(options: AppOptions = {}): Express {
   // CSV batch import legitimately exceeds the default cap. This must be mounted BEFORE the global
   // parser: body-parser only runs once per request, so a route-level parser added later never sees the body.
   app.use('/api/cases/import', express.json({ limit: '1mb' }));
+  // Facility integrations sign the exact bytes they send, so these routes keep the body raw (mounted before the JSON parser).
+  app.use('/api/integrations', express.raw({ type: () => true, limit: '1mb' }));
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser(env.COOKIE_SECRET));
 
@@ -100,7 +105,9 @@ export function createApp(options: AppOptions = {}): Express {
   api.use('/templates', templatesRouter());
   api.use('/comms-log', commsLogRouter());
   api.use('/webhooks/messaging', messagingWebhooksRouter());
+  api.use('/facilities/:facilityId/api-keys', apiKeysRouter());
   api.use('/facilities', facilitiesRouter());
+  api.use('/integrations/v1', integrationsRouter(options.integrations));
   api.use('/organization', organizationRouter());
   api.use('/users', usersRouter());
   api.use('/invites', invitesRouter({ maxPerIp: options.invites?.maxPerIp }));

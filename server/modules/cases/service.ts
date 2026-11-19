@@ -27,7 +27,8 @@ const ASSIGNEE_ROLES = ['PROGRAMME_MANAGER', 'PROGRAMME_COORDINATOR'] as const;
 
 function audit(tx: Tx, auth: AuthContext, action: string, resourceId: string, detail: string, resourceType = 'ReferralCase') {
   return appendAudit(asAuditTx(tx), {
-    orgId: auth.orgId, actorId: auth.userId, actorLabel: auth.name, actorRole: ROLE_LABELS[auth.role],
+    orgId: auth.orgId, actorId: auth.userId || null, actorLabel: auth.name,
+    actorRole: auth.via === 'integration' ? 'Facility system (API)' : ROLE_LABELS[auth.role],
     action, resourceType, resourceId, detail,
   });
 }
@@ -71,7 +72,7 @@ async function applyUpdate(tx: Tx, row: CaseRow, expectedVersion: number | undef
 }
 
 const addMilestone = (tx: Tx, caseId: string, type: MilestoneType, userId: string, at: Date) =>
-  tx.caseMilestone.create({ data: { caseId, type, occurredAt: at, recordedBy: userId } });
+  tx.caseMilestone.create({ data: { caseId, type, occurredAt: at, recordedBy: userId || null } }); // '' = a facility system, not a person
 
 async function reload(tx: Tx | TenantDb, auth: AuthContext, ref: string, now: Date): Promise<CaseDto> {
   return toCaseDto(await loadCase(tx, auth, ref), now);
