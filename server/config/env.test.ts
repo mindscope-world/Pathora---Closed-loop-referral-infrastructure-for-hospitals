@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { envSchema, withSecretFiles } from './env';
+import { envSchema, parseTrustProxy, withSecretFiles } from './env';
 
 const GOOD = {
   NODE_ENV: 'production', DATABASE_URL: 'postgresql://u:p@db:5432/pathora', APP_URL: 'https://app.pathora.test',
@@ -55,5 +55,28 @@ describe('secret files (for secret managers that mount files)', () => {
     const out = withSecretFiles(input, read);
     expect(out.PORT).toBe('4000');
     expect(input).not.toHaveProperty('JWT_SECRET');
+  });
+});
+
+describe('TRUST_PROXY (how many proxies sit in front of the app)', () => {
+  it('defaults to one proxy hop', () => {
+    expect(envSchema.parse(GOOD).TRUST_PROXY).toBe(1);
+  });
+
+  it.each([
+    ['1', 1], ['2', 2], [' 3 ', 3], ['0', 0], ['false', 0], ['FALSE', 0], ['off', 0],
+    ['loopback', 'loopback'], ['10.0.0.0/8', '10.0.0.0/8'], ['10.0.0.1', '10.0.0.1'], ['loopback,,', 'loopback'], ['::1', '::1'], ['fd00::/8', 'fd00::/8'], ['loopback,  10.0.0.0/8 ,2001:db8::/32', 'loopback, 10.0.0.0/8, 2001:db8::/32'],
+  ])('accepts %j', (raw, want) => {
+    expect(parseTrustProxy(raw)).toBe(want);
+    expect(envSchema.parse({ ...GOOD, TRUST_PROXY: raw }).TRUST_PROXY).toBe(want);
+  });
+
+  it.each(['true', 'TRUE', 'on', 'yes'])('refuses %j: trusting any client-supplied address lets visitors forge theirs', (raw) => {
+    expect(() => parseTrustProxy(raw)).toThrow(/forge/);
+    expect(issues({ TRUST_PROXY: raw }).join()).toContain('TRUST_PROXY');
+  });
+
+  it.each(['-1', '11', '1.5', '', 'abc', 'one', '10.0.0.0/8; drop table', '*', 'http://x', '10.0.0.0/33', '::1/129', '10.0.0.0/8/8', '10.0.0.256', 'dead:beef'])('refuses %j', (raw) => {
+    expect(() => parseTrustProxy(raw)).toThrow();
   });
 });

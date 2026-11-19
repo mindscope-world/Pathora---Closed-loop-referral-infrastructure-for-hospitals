@@ -27,9 +27,11 @@ JWT/cookie secret, or an http `APP_URL`.
 Secrets from a secret manager: set `NAME_FILE=/path/to/mounted/secret` instead of `NAME` (works for any variable, e.g.
 `JWT_SECRET_FILE`, `DATABASE_URL_FILE`, `AT_API_KEY_FILE`). Never bake secrets into the image; `.env*` is excluded from it.
 
+Hosting: `TRUST_PROXY` (proxy hops in front of the app, default 1; `true` is refused; verify with `/diagnostics/client-ip`), `MIGRATE_ON_START=true` (apply migrations at container start, for hosts without a pre-deploy step). Render: see [`render-deployment.md`](render-deployment.md).
+
 Optional: `SMTP_URL`/`MAIL_FROM` (invitations, SLA emails, lead notifications), `LEADS_NOTIFY_EMAIL`, messaging provider
 (`MESSAGING_PROVIDER=africastalking`, `AT_*`, `MESSAGING_WEBHOOK_SECRET`), `EXPORT_DIR` (mount an encrypted persistent volume),
-`STATIC_DIR` (default `dist` in production), `METRICS_TOKEN` (enables `/metrics`; unset = endpoint does not exist).
+`STATIC_DIR` (default `dist` in production), `METRICS_TOKEN` (enables `/metrics` and `/diagnostics/client-ip`; unset = both do not exist).
 
 ## Monitoring
 

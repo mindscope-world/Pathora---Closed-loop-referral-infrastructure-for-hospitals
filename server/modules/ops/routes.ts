@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { env } from '../../config/env';
 import { prisma } from '../../db/client';
 import { asyncHandler } from '../../lib/asyncHandler';
@@ -52,13 +52,28 @@ export function opsRouter(): Router {
     }
   }));
 
-  r.get('/metrics', asyncHandler(async (req, res) => {
+  // Operator endpoints: they exist only when METRICS_TOKEN is set, and need it as a bearer token.
+  const operatorOnly: RequestHandler = (req, res, next) => {
     if (!env.METRICS_TOKEN) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Not found' } }); // disabled: indistinguishable from absent
     const m = /^Bearer (\S+)$/.exec(req.header('authorization') ?? '');
     if (!tokenOk(m?.[1])) {
       res.setHeader('WWW-Authenticate', 'Bearer');
       return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
     }
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  };
+
+  /**
+   * What address does the app think the caller has? After deploying behind a platform load balancer, call this from your own
+   * machine: `ip` must be YOUR public address. If it is the platform's, raise TRUST_PROXY; if `ip` is a value you could have
+   * forged with your own X-Forwarded-For header, lower it. Only the caller's own address is returned.
+   */
+  r.get('/diagnostics/client-ip', operatorOnly, (req, res) => {
+    res.json({ ip: req.ip ?? null, forwardedChain: req.ips, xForwardedFor: req.header('x-forwarded-for') ?? null, trustProxy: req.app.get('trust proxy') });
+  });
+
+  r.get('/metrics', operatorOnly, asyncHandler(async (_req, res) => {
     let gauges: Gauge[];
     try {
       gauges = await collectGauges();

@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { z } from 'zod';
 
 const base64Key32 = z
@@ -7,6 +8,37 @@ const base64Key32 = z
   .refine((v) => Buffer.from(v, 'base64').length === 32, {
     message: 'must be a base64-encoded 32-byte key (generate: openssl rand -base64 32)',
   });
+
+/**
+ * How many reverse proxies sit in front of the app, so the client's real address (used by every per-IP rate limit) is
+ * read from the right place in X-Forwarded-For. Get this wrong and either all visitors share one address (limits trip for
+ * everyone) or a visitor can forge their address (limits are bypassed). So the unsafe value `true` ("trust anyone") is refused.
+ *
+ *   "1"            one proxy hop (the default)         "2"  two hops          "0" / "false"  no proxy
+ *   "10.0.0.0/8, loopback"   trust these addresses/ranges instead of counting hops
+ */
+export function parseTrustProxy(raw: string): number | string {
+  const v = raw.trim();
+  if (/^(false|off|no)$/i.test(v)) return 0;
+  if (/^\d+$/.test(v)) {
+    const hops = Number(v);
+    if (hops > 10) throw new Error('is not plausible: more than 10 proxy hops');
+    return hops;
+  }
+  if (/^(true|on|yes)$/i.test(v)) throw new Error('"true" would trust any client-supplied address and let visitors forge theirs; use a hop count or a list of proxy addresses');
+  const parts = v.split(',').map((p) => p.trim()).filter(Boolean);
+  const validEntry = (p: string) => {
+    if (/^(loopback|linklocal|uniquelocal)$/i.test(p)) return true;
+    const [addr, prefix, ...rest] = p.split('/');
+    const family = isIP(addr); // a real parse: "abc" and "1.5" are not addresses
+    if (family === 0 || rest.length > 0) return false;
+    if (prefix === undefined) return true;
+    return /^\d{1,3}$/.test(prefix) && Number(prefix) <= (family === 4 ? 32 : 128);
+  };
+  const ok = parts.length > 0 && parts.every(validEntry);
+  if (!ok) throw new Error('must be a number of proxy hops, or a comma-separated list of proxy addresses/ranges (e.g. "10.0.0.0/8, loopback")');
+  return parts.join(', ');
+}
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -39,6 +71,19 @@ export const envSchema = z.object({
   AT_BASE_URL: z.string().url().optional(),
   /** Shared secret the provider puts on webhook URLs (?secret=…). Webhooks are disabled without it. */
   MESSAGING_WEBHOOK_SECRET: z.string().min(24, 'must be at least 24 characters').optional(),
+
+  // Reverse proxies in front of the app (see parseTrustProxy). Verify with /diagnostics/client-ip after deploying.
+  TRUST_PROXY: z
+    .string()
+    .default('1')
+    .transform((v, ctx) => {
+      try {
+        return parseTrustProxy(v);
+      } catch (e) {
+        ctx.addIssue({ code: 'custom', message: (e as Error).message });
+        return z.NEVER;
+      }
+    }),
 
   // Production: serve the built frontend from this folder (single deployable). Default: ./dist when NODE_ENV=production.
   STATIC_DIR: z.string().min(1).optional(),

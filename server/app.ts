@@ -47,6 +47,8 @@ export interface AppOptions {
   invites?: { maxPerIp?: number };
   leads?: { maxPerIp?: number };
   integrations?: { maxFailedPerIp?: number; maxPerKey?: number };
+  /** Override TRUST_PROXY (tests). */
+  trustProxy?: number | string;
   /** Folder holding the built frontend. Defaults to STATIC_DIR, or ./dist in production; none in development/tests. */
   staticDir?: string;
   messages?: {
@@ -64,8 +66,9 @@ export function createApp(options: AppOptions = {}): Express {
   const allowedOrigin = new URL(env.APP_URL).origin;
 
   app.disable('x-powered-by');
-  // Behind Cloud Run / a load balancer; needed for correct client IPs in rate limiting.
-  app.set('trust proxy', 1);
+  // Behind a platform load balancer; needed for correct client IPs in rate limiting. Configurable (TRUST_PROXY) because
+  // the number of proxies differs per host, and getting it wrong breaks every per-IP limit.
+  app.set('trust proxy', options.trustProxy ?? env.TRUST_PROXY);
 
   app.use(requestId);
   // Traffic metrics. The route label is the matched TEMPLATE (e.g. /api/cases/:ref/acknowledge), never the real URL, so
