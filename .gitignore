@@ -10,3 +10,6 @@ coverage/
 # local build output
 server.js
 server/db/generated/
+
+# generated export files (local file store)
+.data/

@@ -108,11 +108,20 @@ enum DeliveryStatus {
   HUMAN_ROUTED
 }
 
+enum ExportType {
+  /// Live referral cohort (one row per case).
+  CASES_CSV
+  /// The audit trail, with each event's hash so the file is independently verifiable.
+  AUDIT_CSV
+}
+
 enum ExportStatus {
   PENDING
   RUNNING
   READY
   FAILED
+  /// File deleted after its retention period.
+  EXPIRED
 }
 
 // ───────────────────────────── Tenancy & identity ─────────────────────────────
@@ -422,16 +431,33 @@ model AuditEvent {
 model ExportJob {
   id          String       @id @default(cuid())
   orgId       String
-  type        String
+  type        ExportType
   requestedBy String
+  /// Filters the requester chose (e.g. { from, to }).
+  params      Json?
   status      ExportStatus @default(PENDING)
+  /// Name offered to the browser on download.
+  fileName    String
+  /// Storage key of the generated file (see server/storage/fileStore.ts).
   fileKey     String?
+  rowCount    Int?
+  byteSize    Int?
+  /// SHA-256 of the file, so a recipient can confirm it was not altered after download.
+  sha256      String?
+  /// Audit exports: the hash of the last event included. Anyone can compare it with /audit/verify.
+  chainTip    String?
+  attempts    Int          @default(0)
+  /// Short, user-safe reason when generation failed (details go to the server log).
+  error       String?
   createdAt   DateTime     @default(now())
+  startedAt   DateTime?
   completedAt DateTime?
+  expiresAt   DateTime?
 
   org Organization @relation(fields: [orgId], references: [id])
 
   @@index([orgId, createdAt])
+  @@index([status, createdAt])
 }
 
 /// Public "request a walkthrough" submissions (DiscoveryModal). Not tenant-scoped.

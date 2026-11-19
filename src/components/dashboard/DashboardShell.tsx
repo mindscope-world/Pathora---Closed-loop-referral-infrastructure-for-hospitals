@@ -25,9 +25,7 @@ import * as workspaceApi from '../../api/workspace';
 import { ApiError } from '../../lib/api';
 import { describeApiError, useWorkspace } from '../../data/useWorkspace';
 import {
-  AuditEvent,
   CommsLogEntry,
-  INITIAL_AUDIT_EVENTS,
   INITIAL_COMMS_LOG,
   INITIAL_RULE_PACKS,
   INITIAL_TEAM,
@@ -40,7 +38,8 @@ import { FacilitiesView } from './FacilitiesView';
 import { EscalationsView } from './EscalationsView';
 import { CommsConsentView } from './CommsConsentView';
 import { PathwaysView } from './PathwaysView';
-import { AuditView, SettingsView } from './AuditSettingsViews';
+import { AuditView } from './AuditView';
+import { SettingsView } from './AuditSettingsViews';
 import { ReferralProgressTracker, deriveReferralJourney } from './ReferralProgressTracker';
 
 export type DashboardTab =
@@ -79,11 +78,10 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   const ws = useWorkspace(role);
   const { cases, facilities, assignees } = ws;
 
-  // Still demo data until their phases land: comms log (Phase 7), rule packs (Phase 6),
-  // audit trail (Phase 4) and team (Phase 5).
+  // Still demo data until their phases land: comms log (Phase 7), rule packs (Phase 6) and team (Phase 5).
+  // (The audit trail is real: the server records every action itself; see AuditView.)
   const [commsLog, setCommsLog] = useState<CommsLogEntry[]>(INITIAL_COMMS_LOG);
   const [rulePacks, setRulePacks] = useState<PathwayRulePack[]>(INITIAL_RULE_PACKS);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(INITIAL_AUDIT_EVENTS);
   const [team, setTeam] = useState<TeamMember[]>(INITIAL_TEAM);
 
   // Global Header Search State
@@ -137,33 +135,6 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   }, [assignees, facilities, user?.id, newCoordinator, newFacility]);
 
   const selectedCase = cases.find((c) => c.id === selectedCaseId) ?? null;
-  const actorName = currentUser?.name ?? user?.name ?? 'Unknown user';
-  const actorRole = currentUser?.role ?? '';
-
-  /** Local record for the demo Audit & Exports screen. Phase 4 replaces it with the server's audit trail. */
-  const appendAudit = (
-    actor: string,
-    role: string,
-    action: string,
-    resourceId: string,
-    detail: string
-  ) => {
-    setAuditEvents((prev) => [
-      {
-        id: `AUD-${500 + prev.length + 1}`,
-        timestamp: nowTimestamp(),
-        actor,
-        role,
-        action,
-        resourceId,
-        detail,
-      },
-      ...prev,
-    ]);
-  };
-  const localAudit = (action: string, resourceId: string, detail: string) =>
-    appendAudit(actorName, actorRole, action, resourceId, detail);
-
   /**
    * Runs one case action against the API and swaps in the server's version of the case.
    * Failures are shown to the user; if our view of the case was stale we refresh it.
@@ -189,13 +160,11 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
 
   // Case Actions
   const handleAcknowledgeCase = async (caseId: string) => {
-    const dto = await run(() => workspaceApi.acknowledgeCase(caseId, versionOf(caseId)));
-    if (dto) localAudit('FACILITY_ACKNOWLEDGED', caseId, 'Confirmed referral receipt via Receiving Facility Desk.');
+    await run(() => workspaceApi.acknowledgeCase(caseId, versionOf(caseId)));
   };
 
   const handleConfirmAttendance = async (caseId: string) => {
-    const dto = await run(() => workspaceApi.confirmAttendance(caseId, versionOf(caseId)));
-    if (dto) localAudit('ATTENDANCE_CONFIRMED', caseId, 'Confirmed patient clinical attendance at receiving facility.');
+    await run(() => workspaceApi.confirmAttendance(caseId, versionOf(caseId)));
   };
 
   const handleDocumentClosure = async (e: FormEvent) => {
@@ -208,25 +177,19 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
         selectedCase.version
       )
     );
-    if (dto) {
-      localAudit('OUTCOME_VERIFIED_CLOSURE', selectedCase.id, `Closed case with verified outcome: ${closureReasonInput}`);
-      setOutcomeSourceInput('');
-    }
+    if (dto) setOutcomeSourceInput('');
   };
 
   const handleEscalateToClinicalLead = async (caseId: string, reason: string) => {
-    const dto = await run(() => workspaceApi.escalateCase(caseId, { reason }, versionOf(caseId)));
-    if (dto) localAudit('CASE_ESCALATED', caseId, reason);
+    await run(() => workspaceApi.escalateCase(caseId, { reason }, versionOf(caseId)));
   };
 
   const handleLogBarrierResolution = async (caseId: string, barrierNote: string) => {
-    const dto = await run(() => workspaceApi.resolveBarrier(caseId, { note: barrierNote }, versionOf(caseId)));
-    if (dto) localAudit('BARRIER_RESOLUTION_LOGGED', caseId, barrierNote);
+    await run(() => workspaceApi.resolveBarrier(caseId, { note: barrierNote }, versionOf(caseId)));
   };
 
   const handleReassignOwner = async (caseId: string, coordinatorId: string) => {
-    const dto = await run(() => workspaceApi.reassignCase(caseId, coordinatorId, versionOf(caseId)));
-    if (dto) localAudit('CASE_REASSIGNED', caseId, `Named ownership transferred to ${dto.coordinator.name}.`);
+    await run(() => workspaceApi.reassignCase(caseId, coordinatorId, versionOf(caseId)));
   };
 
   const handleSendMessage = (
@@ -250,32 +213,13 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
       },
       ...prev,
     ]);
-
-    appendAudit(
-      target.coordinator,
-      'Programme Coordinator',
-      target.optedOut ? 'MESSAGE_BLOCKED_OPTOUT' : 'DISCREET_MESSAGE_SENT',
-      caseId,
-      target.optedOut
-        ? `Blocked ${channel} template (${templateName}) due to recorded patient opt-out.`
-        : `Sent discreet ${channel} template "${templateName}".`
-    );
   };
 
   const handleToggleOptOut = async (caseId: string) => {
     const target = cases.find((c) => c.id === caseId);
     if (!target) return;
     const nextOptOut = !target.optedOut;
-    const dto = await run(() => workspaceApi.setOptOut(caseId, nextOptOut));
-    if (dto) {
-      localAudit(
-        nextOptOut ? 'CONSENT_OPTOUT_RECORDED' : 'CONSENT_RESTORED',
-        caseId,
-        nextOptOut
-          ? 'Patient opted out of automated SMS/WhatsApp; routed to human coordinator.'
-          : 'Patient follow-up consent restored.'
-      );
-    }
+    await run(() => workspaceApi.setOptOut(caseId, nextOptOut));
   };
 
   const handleUpdateRulePackSla = (
@@ -287,13 +231,6 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
       prev.map((p) =>
         p.id === id ? { ...p, ackSlaHours, evalTargetDays } : p
       )
-    );
-    appendAudit(
-      'Dr. Grace Njeri',
-      'Partner Clinical Lead',
-      'RULE_PACK_UPDATED',
-      id,
-      `Updated facility acknowledgment SLA to ${ackSlaHours}h and evaluation target to ${evalTargetDays} days.`
     );
   };
 
@@ -327,11 +264,6 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
       );
       ws.upsertCase(dto);
       createKey.current = crypto.randomUUID();
-      localAudit(
-        'CASE_CREATED',
-        dto.id,
-        `Logged ${PATHWAY_LABELS[dto.pathway]} positive screen (${dto.patientCode}) routed to ${dto.facility.name}.`
-      );
       setNewPatientName('');
       setNewPatientCode('');
       setNewPatientLabel('');
@@ -374,9 +306,6 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
       if (!dryRun) {
         csvKey.current = crypto.randomUUID();
         await ws.reload(true);
-        if (res.imported > 0) {
-          localAudit('CSV_BATCH_IMPORTED', `BATCH-${res.imported}`, `Imported ${res.imported} consented referrals via secure CSV intake.`);
-        }
         if (res.imported > 0 && res.rejected === 0) {
           setTimeout(() => {
             setCsvModalOpen(false);
@@ -755,19 +684,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
             />
           )}
           {activeTab === 'audit' && (
-            <AuditView
-              auditEvents={auditEvents}
-              cases={cases}
-              onExportLogged={(exportType) =>
-                appendAudit(
-                  'Miriam Wanjiku',
-                  'Programme Coordinator',
-                  'DATA_EXPORTED',
-                  'REPORT',
-                  `Exported ${exportType}.`
-                )
-              }
-            />
+            <AuditView canExport={allowed('exports.create')} />
           )}
           {activeTab === 'settings' && (
             <SettingsView
@@ -784,13 +701,6 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                   active: true,
                 };
                 setTeam((prev) => [...prev, newMember]);
-                appendAudit(
-                  'Programme Manager',
-                  'Programme Manager',
-                  'TEAM_USER_ADDED',
-                  newMember.id,
-                  `Added ${newMember.name} as ${newMember.role}.`
-                );
               }}
             />
           )}

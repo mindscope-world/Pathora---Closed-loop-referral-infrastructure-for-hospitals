@@ -1,4 +1,4 @@
-import { PATHWAY_LABELS, type CaseDto, type CaseStage, type CaseStatus as ApiCaseStatus, type FacilityDto } from '../../shared/types';
+import { PATHWAY_LABELS, STAGE_LABELS, STATUS_LABELS, type CaseDto, type CaseStage, type CaseStatus as ApiCaseStatus, type FacilityDto } from '../../shared/types';
 import type {
   CaseMilestones,
   CaseStage as ViewStage,
@@ -14,23 +14,8 @@ import type {
  * stay unchanged and the API stays clean.
  */
 
-const STAGE: Record<CaseStage, ViewStage> = {
-  INTAKE: 'Intake',
-  ASSIGNED: 'Assigned',
-  CONTACTED: 'Contacted',
-  HANDOFF_SENT: 'Handoff Sent',
-  ACKNOWLEDGED: 'Acknowledged',
-  ATTENDED: 'Attended',
-  ESCALATED: 'Escalated',
-  CLOSED: 'Closed',
-};
-
-const STATUS: Record<ApiCaseStatus, ViewStatus> = {
-  ACTIVE: 'Active',
-  AWAITING_ACK: 'Awaiting Ack',
-  OVERDUE_SLA: 'Overdue SLA',
-  CLOSED_VERIFIED: 'Closed Verified',
-};
+const STAGE = STAGE_LABELS as Record<CaseStage, ViewStage>;
+const STATUS = STATUS_LABELS as Record<ApiCaseStatus, ViewStatus>;
 
 const FACILITY_TYPE: Record<FacilityDto['type'], FacilityPartner['type']> = {
   PUBLIC_REFERRAL: 'Public Referral',

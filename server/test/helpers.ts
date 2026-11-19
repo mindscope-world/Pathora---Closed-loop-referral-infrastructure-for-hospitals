@@ -8,7 +8,12 @@ export const uniqueEmail = (prefix = 'user') => `${prefix}.${Date.now()}.${++cou
 export const STRONG_PASSWORD = 'correct horse battery staple';
 
 /** App with generous per-IP caps so only the behaviour under test can trigger limits. */
-export const makeApp = () => createApp({ auth: { loginMaxPerIp: 10_000, signupMaxPerIp: 10_000 } });
+/**
+ * Background export generation is off in tests (the kick does nothing); tests that need an export
+ * generated call `processPending()` themselves, which keeps them deterministic.
+ */
+export const makeApp = () =>
+  createApp({ auth: { loginMaxPerIp: 10_000, signupMaxPerIp: 10_000 }, exports: { kick: () => undefined } });
 
 export function signupBody(over: Record<string, unknown> = {}) {
   return {

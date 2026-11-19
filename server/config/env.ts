@@ -19,6 +19,9 @@ const schema = z.object({
   COOKIE_SECRET: z.string().min(32, 'must be at least 32 characters'),
   FIELD_ENCRYPTION_KEY: base64Key32,
 
+  // Where generated export files are kept (local disk; swap for object storage in production).
+  EXPORT_DIR: z.string().min(1).default('.data/exports'),
+
   // Messaging provider (used from Phase 7). 'mock' needs no credentials.
   MESSAGING_PROVIDER: z.enum(['mock', 'africastalking']).default('mock'),
   AT_USERNAME: z.string().optional(),

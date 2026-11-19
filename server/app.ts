@@ -10,6 +10,11 @@ import { requestId } from './middleware/requestId';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { authRouter, type AuthRouterOptions } from './modules/auth/routes';
 import { casesRouter, facilitiesRouter, searchRouter } from './modules/cases/routes';
+import { auditRouter } from './modules/audit/routes';
+import { exportsRouter } from './modules/exports/routes';
+import { redactToken } from './modules/exports/signedUrl';
+import { processPending } from './jobs/exportWorker';
+import pino from 'pino';
 
 const healthz: RequestHandler = (_req, res) => {
   const body: HealthResponse = {
@@ -23,6 +28,10 @@ const healthz: RequestHandler = (_req, res) => {
 
 export interface AppOptions {
   auth?: AuthRouterOptions;
+  exports?: {
+    /** Called after an export is queued so it starts promptly. Tests replace it to drive the worker by hand. */
+    kick?: () => void;
+  };
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -38,6 +47,14 @@ export function createApp(options: AppOptions = {}): Express {
     pinoHttp({
       logger,
       genReqId: (req) => (req as express.Request).id,
+      serializers: {
+        // Export download links carry a signed token in the query string; keep it out of the logs.
+        req: (req) => {
+          const out = pino.stdSerializers.req(req);
+          out.url = redactToken(out.url);
+          return out;
+        },
+      },
       autoLogging: { ignore: (req) => req.url === '/healthz' || req.url === '/api/healthz' },
     }),
   );
@@ -65,6 +82,13 @@ export function createApp(options: AppOptions = {}): Express {
   api.use('/cases', casesRouter());
   api.use('/facilities', facilitiesRouter());
   api.use('/search', searchRouter());
+  api.use('/audit', auditRouter());
+  api.use(
+    '/exports',
+    exportsRouter({
+      kick: options.exports?.kick ?? (() => void processPending().catch((err) => logger.error({ err }, 'Export run failed'))),
+    }),
+  );
   // Further feature routers (comms, rule packs, audit...) are mounted here in later phases.
   app.use('/api', api);
   app.use('/api', notFoundHandler);

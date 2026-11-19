@@ -10,6 +10,7 @@ import { nameTokens } from '../../lib/searchIndex';
 import { caseScope } from '../../middleware/tenant';
 import type { AuthContext } from '../../types';
 import { appendAudit, appendAuditBatch } from '../audit/append';
+import { toAuditEventDto } from '../audit/dto';
 import { caseInclude, hasMilestone, toCaseDto, type CaseRow } from './dto';
 import { buildCaseWhere, decodeCursor, encodeCursor, type ListQuery } from './queries';
 import { ackDeadline, barrierDeadline, evaluationDeadline } from './sla';
@@ -136,9 +137,7 @@ export async function getCaseDetail(auth: AuthContext, ref: string): Promise<Cas
 
     return {
       ...toCaseDto(row, now),
-      timeline: timeline.map((e) => ({
-        id: String(e.id), at: e.at.toISOString(), actor: e.actorLabel, role: e.actorRole, action: e.action, detail: e.detail,
-      })),
+      timeline: timeline.map(toAuditEventDto),
       comms: comms.map((c) => ({
         id: c.id, channel: c.channel, templateName: c.templateName, status: c.status, sentAt: c.sentAt.toISOString(),
       })),
