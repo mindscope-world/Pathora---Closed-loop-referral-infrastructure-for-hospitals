@@ -1,18 +1,14 @@
 import { Check, Minus } from 'lucide-react';
 
 const MVP_INCLUDED = [
-  'Configurable workflows, deadlines and SLA escalations',
-  'Named case ownership and role-based access across organisations',
-  'Separate tracking of sent, acknowledged, attended and outcome',
+  'Deadlines, escalations and named ownership for every referral',
   'Consent-led SMS and WhatsApp follow-up with opt-out',
-  'Programme dashboards showing bottlenecks and overdue cases',
+  'Dashboards showing bottlenecks and overdue cases',
 ];
 
 const STRICT_BOUNDARIES = [
-  'No AI risk prediction or autonomous triage',
-  'No diagnosis, treatment advice or clinical judgement',
+  'No diagnosis, triage or treatment advice',
   'No parallel medical record or billing system',
-  'No case closure just because a referral was sent',
   'No live patient data before data protection agreements are signed',
 ];
 

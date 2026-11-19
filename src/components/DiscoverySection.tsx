@@ -5,12 +5,6 @@ import { Alert, Button, Card, Field, Input, Select } from './ui';
 
 const PATHWAYS = ['Cancer Screening', 'NCD Screening', 'Male Reproductive Health', 'Maternal & Child Health'];
 
-const WHAT_YOU_GET = [
-  'A map of one screening-to-care pathway and where referrals stall today',
-  'A readiness check for your receiving facility’s status-return route',
-  'A 90-day pilot plan sized to your cohort',
-];
-
 export function DiscoverySection() {
   const [name, setName] = useState('');
   const [organization, setOrganization] = useState('');
@@ -50,21 +44,12 @@ export function DiscoverySection() {
   return (
     <section id="contact" className="py-16 sm:py-20 scroll-mt-16">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-start">
-        <div className="lg:col-span-5 space-y-6">
-          <div className="space-y-3">
-            <h2 className="text-3xl font-semibold tracking-tight text-ink">See it on your own pathway</h2>
-            <p className="text-ink-2 leading-relaxed">
-              A 30–45 minute walkthrough with your programme, clinical and digital health leads.
-            </p>
-          </div>
-          <ul className="space-y-3">
-            {WHAT_YOU_GET.map((item) => (
-              <li key={item} className="flex gap-2.5 text-sm text-ink-2 leading-relaxed">
-                <CheckCircle2 className="size-4 mt-0.5 shrink-0 text-brand" />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
+        <div className="lg:col-span-5 space-y-3">
+          <h2 className="text-3xl font-semibold tracking-tight text-ink">See it on your own pathway</h2>
+          <p className="text-ink-2 leading-relaxed">
+            A 30–45 minute walkthrough that maps one pathway, shows where referrals stall today, and sizes a 90-day
+            pilot for your cohort.
+          </p>
         </div>
 
         <Card className="lg:col-span-7 p-6 sm:p-8">
