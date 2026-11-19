@@ -1,17 +1,20 @@
 import { createApp } from './app';
 import { env } from './config/env';
 import { logger } from './lib/logger';
+import { startExportWorker } from './jobs/exportWorker';
 
 const app = createApp();
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Pathora API listening');
 });
+const stopExportWorker = startExportWorker();
 
 let shuttingDown = false;
 function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info({ signal }, 'Shutting down');
+  stopExportWorker();
   server.close((err) => {
     if (err) {
       logger.error({ err }, 'Error during shutdown');

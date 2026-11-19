@@ -128,14 +128,21 @@ export interface CaseDto {
   version: number;
 }
 
-export interface AuditEntryDto {
+export interface AuditEventDto {
+  /** Monotonic per-chain sequence number (string: it can exceed JS's safe integer range). */
   id: string;
   at: string;
   actor: string;
   role: string;
   action: string;
+  resourceType: string;
+  resourceId: string;
   detail: string;
+  /** This event's place in the tamper-evident chain. */
+  hash: string;
 }
+/** Case timeline entries are the same events. */
+export type AuditEntryDto = AuditEventDto;
 
 export interface CommsEntryDto {
   id: string;
@@ -236,3 +243,73 @@ export const PATHWAY_LABELS: Record<PathwayId, string> = {
   MALE_REPRODUCTIVE_HEALTH: 'Male Reproductive Health',
   MATERNAL_CHILD_HEALTH: 'Maternal & Child Health',
 };
+
+export const STAGE_LABELS: Record<CaseStage, string> = {
+  INTAKE: 'Intake',
+  ASSIGNED: 'Assigned',
+  CONTACTED: 'Contacted',
+  HANDOFF_SENT: 'Handoff Sent',
+  ACKNOWLEDGED: 'Acknowledged',
+  ATTENDED: 'Attended',
+  ESCALATED: 'Escalated',
+  CLOSED: 'Closed',
+};
+
+export const STATUS_LABELS: Record<CaseStatus, string> = {
+  ACTIVE: 'Active',
+  AWAITING_ACK: 'Awaiting Ack',
+  OVERDUE_SLA: 'Overdue SLA',
+  CLOSED_VERIFIED: 'Closed Verified',
+};
+
+// ───────────────────────────── Audit & exports ─────────────────────────────
+
+export interface AuditListResponse {
+  events: AuditEventDto[];
+  nextCursor: string | null;
+}
+
+export interface AuditVerifyResponse {
+  /** true when every event's hash and link to its predecessor check out. */
+  ok: boolean;
+  /** Events checked (up to the first problem). */
+  count: number;
+  /** Hash of the newest event: record it externally to later prove nothing before it changed. */
+  tipHash: string | null;
+  verifiedAt: string;
+  brokenAtId?: string;
+  reason?: string;
+}
+
+export type ExportType = 'CASES_CSV' | 'AUDIT_CSV';
+export type ExportStatus = 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'EXPIRED';
+
+export const EXPORT_LABELS: Record<ExportType, string> = {
+  CASES_CSV: 'Live Referral Cohort CSV',
+  AUDIT_CSV: 'Immutable Audit Trail CSV',
+};
+
+export interface CreateExportRequest {
+  type: ExportType;
+  /** Optional ISO-8601 bounds (inclusive): referral issue time for cases, event time for audit. */
+  from?: string;
+  to?: string;
+}
+
+export interface ExportJobDto {
+  id: string;
+  type: ExportType;
+  status: ExportStatus;
+  fileName: string;
+  requestedBy: string;
+  requestedAt: string;
+  completedAt: string | null;
+  expiresAt: string | null;
+  rowCount: number | null;
+  byteSize: number | null;
+  sha256: string | null;
+  chainTip: string | null;
+  error: string | null;
+  /** Short-lived signed link; present only while the job is READY. Each fetch of the job mints a fresh one. */
+  downloadUrl: string | null;
+}

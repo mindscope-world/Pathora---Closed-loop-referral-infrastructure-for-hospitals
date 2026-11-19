@@ -343,6 +343,16 @@ Each phase ends in something demoable and testable. Phases 0–4 give a usable c
 
 **Exit:** exports reproduce the demo CSVs, and tampering with a row makes `/audit/verify` fail.
 
+> **Phase 4 as built** (differences from the steps above, and why)
+> - **Queue:** generation runs from a small database-backed queue (the `ExportJob` table, claimed with `FOR UPDATE SKIP LOCKED`, with crash recovery and retention expiry) rather than pg-boss. It needs no new infrastructure, is multi-instance safe, and is directly testable. pg-boss is still installed for Phase 6 if the SLA monitor wants it.
+> - **Storage:** a `FileStore` interface with a local-disk implementation (`EXPORT_DIR`, owner-only files, atomic publish). Production should add an S3/GCS implementation behind the same interface.
+> - **Download links:** HMAC-signed, 5 minutes, bound to one export and organisation, re-checked against the requester's *current* permissions when used. They are served by the API itself, and the token is redacted from request logs.
+> - **Audit trail:** `EXPORT_REQUESTED`, `EXPORT_GENERATED`, `EXPORT_FAILED` and `EXPORT_DOWNLOADED` are all recorded. Audit exports include every hashed field plus each event's hash, so a recipient can recompute the chain from the file alone (a test does exactly this). Each export records its SHA-256 and, for audit exports, the chain tip it ends at.
+> - **`GET /audit/verify`** also returns the chain's tip hash: record it outside the database and any later change to earlier history becomes provable.
+> - **CSV safety:** text cells that would start with `= + - @` are neutralised (spreadsheet formula injection); numbers are written as numbers. The referral export contains **no patient names**, only programme codes.
+> - **Guard:** a test fails the build if any code other than `audit/append.ts` writes `AuditEvent` rows.
+> - **UI:** the Audit screen now reads the server's trail (search, load-more, integrity check, recent exports). The local demo audit log in the dashboard has been removed. Actions on still-mock features (comms sends, rule-pack edits, team changes) no longer appear in it, because they do not exist on the server yet.
+
 ### Phase 5: Facilities, team and organisation settings (1 day)
 1. Facilities: `GET/POST/PATCH /facilities`. `avgAckHours` is computed from milestones (a view or a nightly rollup).
 2. Team: `GET /users`, `POST /users/invite` (emails a signed invite link and sets the password on acceptance), `PATCH /users/:id` (deactivate). Deactivation revokes refresh tokens. Do not hard-delete, because audit rows reference users.
