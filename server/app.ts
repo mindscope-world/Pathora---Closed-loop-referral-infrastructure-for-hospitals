@@ -19,6 +19,8 @@ import { kickMessageWorker } from './jobs/messageWorker';
 import { invitesRouter, usersRouter } from './modules/team/routes';
 import { auditRouter } from './modules/audit/routes';
 import { exportsRouter } from './modules/exports/routes';
+import { metricsRouter } from './modules/metrics/routes';
+import { reportSchedulesRouter } from './modules/reports/routes';
 import { redactToken } from './modules/exports/signedUrl';
 import { processPending } from './jobs/exportWorker';
 import pino from 'pino';
@@ -105,6 +107,8 @@ export function createApp(options: AppOptions = {}): Express {
   api.use('/rule-packs', rulePacksRouter());
   api.use('/notifications', notificationsRouter());
   api.use('/audit', auditRouter());
+  api.use('/metrics', metricsRouter());
+  api.use('/report-schedules', reportSchedulesRouter());
   api.use(
     '/exports',
     exportsRouter({

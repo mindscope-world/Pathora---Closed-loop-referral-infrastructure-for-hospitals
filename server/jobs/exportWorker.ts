@@ -4,7 +4,7 @@ import { prisma } from '../db/client';
 import { logger } from '../lib/logger';
 import { getFileStore } from '../storage/fileStore';
 import { appendAudit } from '../modules/audit/append';
-import { generateAuditCsv, generateCasesCsv, sinkFor, type ExportParams, type GenerateResult } from '../modules/exports/generators';
+import { generateAuditCsv, generateCasesCsv, generateGovernanceCsv, sinkFor, type ExportParams, type GenerateResult } from '../modules/exports/generators';
 
 /**
  * Export generation, run as a small database-backed queue: the ExportJob table IS the queue.
@@ -21,6 +21,7 @@ const DAY_MS = 86_400_000;
 const GENERATORS: Record<ExportType, typeof generateCasesCsv> = {
   CASES_CSV: generateCasesCsv,
   AUDIT_CSV: generateAuditCsv,
+  GOVERNANCE_CSV: generateGovernanceCsv,
 };
 
 /** Atomically takes the oldest PENDING job, or returns null. */

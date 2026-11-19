@@ -6,6 +6,7 @@ import { formatDateTime } from '../../data/caseViewModel';
 import { useAuditLog } from '../../data/useAudit';
 import { describeApiError } from '../../data/useWorkspace';
 import { waitUntilReady } from '../../lib/exportPolling';
+import { ScheduledReports } from './ScheduledReports';
 
 /** Starts a browser download of a signed export link (the server sends it as an attachment). */
 function triggerDownload(url: string) {
@@ -42,7 +43,7 @@ export function AuditView({ canExport }: AuditViewProps) {
   const [exportError, setExportError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // One idempotency key per export attempt: a double-click queues a single export.
-  const keys = useRef<Record<ExportType, string>>({ CASES_CSV: crypto.randomUUID(), AUDIT_CSV: crypto.randomUUID() });
+  const keys = useRef<Record<ExportType, string>>({ CASES_CSV: crypto.randomUUID(), AUDIT_CSV: crypto.randomUUID(), GOVERNANCE_CSV: crypto.randomUUID() });
   const mounted = useRef(true);
 
   const refreshExports = useCallback(async () => {
@@ -135,6 +136,15 @@ export function AuditView({ canExport }: AuditViewProps) {
               <button
                 type="button"
                 disabled={exporting !== null}
+                onClick={() => startExport('GOVERNANCE_CSV')}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-[#061B3A] bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
+              >
+                {exporting === 'GOVERNANCE_CSV' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                <span>{exporting === 'GOVERNANCE_CSV' ? 'Preparing…' : 'Programme Performance Summary (CSV)'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={exporting !== null}
                 onClick={() => startExport('AUDIT_CSV')}
                 className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-[#061B3A] bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
               >
@@ -179,6 +189,8 @@ export function AuditView({ canExport }: AuditViewProps) {
           </ul>
         </div>
       </div>
+
+      {canExport && <ScheduledReports />}
 
       {/* Recent exports */}
       {canExport && exports.length > 0 && (

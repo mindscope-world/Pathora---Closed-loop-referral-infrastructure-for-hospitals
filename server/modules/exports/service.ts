@@ -16,10 +16,10 @@ export const MAX_ACTIVE_EXPORTS = 3;
 const isoDate = z.string().trim().pipe(z.iso.datetime({ offset: true }));
 
 export const createExportSchema = z
-  .object({ type: z.enum(['CASES_CSV', 'AUDIT_CSV']), from: isoDate.optional(), to: isoDate.optional() })
+  .object({ type: z.enum(['CASES_CSV', 'AUDIT_CSV', 'GOVERNANCE_CSV']), from: isoDate.optional(), to: isoDate.optional() })
   .refine((v) => !v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to), { message: 'The start date must not be after the end date', path: ['from'] });
 
-const FILE_PREFIX = { CASES_CSV: 'pathora-live-referrals', AUDIT_CSV: 'pathora-audit-trail' } as const;
+export const FILE_PREFIX = { CASES_CSV: 'pathora-live-referrals', AUDIT_CSV: 'pathora-audit-trail', GOVERNANCE_CSV: 'pathora-programme-performance' } as const;
 
 export function toExportDto(job: ExportJob, requestedByName: string, now: Date = new Date()): ExportJobDto {
   const downloadable = job.status === 'READY' && job.fileKey && (!job.expiresAt || job.expiresAt > now);

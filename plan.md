@@ -433,6 +433,33 @@ Move the client-side aggregations to the server so they are accurate over pagina
 
 **Exit:** the Overview screen renders from `/metrics/overview` only.
 
+#### Phase 8 as built
+
+- **Server-side metrics.** `GET /api/metrics/overview` (funnel, status counts, the four summary-card figures, per-pathway
+  table, median time to acknowledge / to verified close with sample sizes) and `GET /api/metrics/upcoming` (count plus the
+  soonest 10 referrals). The arithmetic is one pure module (`server/modules/metrics/compute.ts`) that uses `deriveStatus`,
+  so the Overview, the exports and the SLA monitor cannot disagree. Funnel steps live in `shared/types.ts` (`FUNNEL_STEPS`).
+  Both endpoints exclude simulation referrals, are scoped like the case list (a facility focal sees only their facility),
+  and carry no patient data. "Today" is a calendar day in East Africa Time, so "due this week" is day 0 to day +7 EAT.
+- **Parity is tested, not assumed.** `metrics.test.ts` keeps the formulas the screen used to run in the browser as a
+  reference and asserts the server returns the same numbers on a mixed dataset, including the EAT-midnight and day +7/+8
+  boundaries. One pre-existing quirk is preserved on purpose: funnel step 3 ("Acknowledged") counts by stage, so an
+  escalated referral the facility had already acknowledged is not in it.
+- **Frontend.** `useMetrics` reloads whenever the workspace's case list changes (every action and its 60 s refresh);
+  `OverviewView`/`DashboardSummary` render the server figures, keep the last good numbers on a failed refresh, and show
+  the two medians. The priority queue still derives from the loaded cases (it needs rows, not counts).
+- **Reports.** New export type `GOVERNANCE_CSV` (programme performance by pathway and facility, with subtotals and a
+  programme total; aggregates only, no patient identifiers) and `ReportSchedule` (weekly = Mondays, monthly = the 1st,
+  06:00 EAT). `reportScheduler` queues an ordinary `ExportJob` in the owner's name for the period that just ended, so the
+  existing worker, retention, signed download and audit apply. Claimed by compare-and-set on `nextRunAt` (safe on several
+  servers); after downtime it produces one catch-up report, not a backlog; it pauses (and audits) a schedule whose owner
+  lost export access. `/api/report-schedules` needs `exports.create`; capped at 10 per organisation; the audit-trail
+  export cannot be scheduled (also enforced by a DB CHECK).
+- **Deliberately not built: the materialised view.** Metrics are computed per request over a narrow select (no patient
+  data) using the existing `(orgId, stage|facilityId|slaDueAt|pathway)` indexes. That is comfortable for pilot volumes
+  (the workspace already loads every case). If an organisation reaches tens of thousands of referrals, add a rollup table
+  refreshed by the SLA monitor behind the same endpoints; nothing else changes.
+
 ### Phase 9: Public site, leads and the AI layer (1 day)
 1. `POST /leads` from `DiscoveryModal`. Zod validation (matching the current regex check), honeypot field and strict rate limit, and no auth. Email notification to the team.
 2. **`@google/genai` (optional, scoped):** the dependency and `MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API` suggest AI was planned. Keep the server-side key and **never send identifiable patient data**. Reasonable low-risk uses: drafting Kiswahili/English template variants for clinical review, and summarising de-identified programme metrics. Anything touching clinical decisions stays out of scope, because the product pitch is *deterministic* rules approved by a clinical lead.

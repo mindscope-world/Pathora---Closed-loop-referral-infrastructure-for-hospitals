@@ -1,38 +1,42 @@
 import { ReferralCase, PathwayName } from '../../data/dashboardData';
 import { ReferralProgressTracker } from './ReferralProgressTracker';
 import { DashboardSummary } from './DashboardSummary';
+import type { OverviewMetricsDto, UpcomingMetricsDto } from '../../../shared/types';
+import { PATHWAY_LABELS } from '../../../shared/types';
 
 interface OverviewViewProps {
+  /** Used for the priority queue only; every headline figure comes from the server metrics below. */
   cases: ReferralCase[];
+  overview: OverviewMetricsDto | null;
+  upcoming: UpcomingMetricsDto | null;
+  upcomingCases: ReferralCase[];
+  metricsError: string | null;
+  onRetryMetrics: () => void;
   onSelectCase: (c: ReferralCase) => void;
   onNavigate: (tab: 'cases' | 'facilities' | 'escalations') => void;
 }
 
-const FUNNEL_ORDER: Array<{ label: string; stages: ReferralCase['stage'][] }> = [
-  { label: '1. Intake & Assigned', stages: ['Intake', 'Assigned', 'Contacted', 'Handoff Sent', 'Acknowledged', 'Attended', 'Escalated', 'Closed'] },
-  { label: '2. Facility Handoff Sent', stages: ['Handoff Sent', 'Acknowledged', 'Attended', 'Escalated', 'Closed'] },
-  { label: '3. Facility Acknowledged', stages: ['Acknowledged', 'Attended', 'Closed'] },
-  { label: '4. Patient Attended', stages: ['Attended', 'Closed'] },
-  { label: '5. Verified Outcome Closed', stages: ['Closed'] },
-];
-
-export function OverviewView({ cases, onSelectCase, onNavigate }: OverviewViewProps) {
-  const totalCases = cases.length;
+export function OverviewView({ cases, overview, upcoming, upcomingCases, metricsError, onRetryMetrics, onSelectCase, onNavigate }: OverviewViewProps) {
 
   const priorityCases = cases.filter(
     (c) => c.status === 'Overdue SLA' || c.status === 'Awaiting Ack' || c.redFlag
   );
 
-  const pathways: PathwayName[] = [
-    'Cancer Screening',
-    'NCD Screening',
-    'Male Reproductive Health',
-  ];
+  // The three pathways the programme runs are always listed; any other appears once it has referrals.
+  const SHOWN: PathwayName[] = ['Cancer Screening', 'NCD Screening', 'Male Reproductive Health'];
+  const pathwayRows = (overview?.pathways ?? [])
+    .map((p) => ({ name: PATHWAY_LABELS[p.pathway], ...p }))
+    .filter((p) => (SHOWN as string[]).includes(p.name) || p.cases > 0);
+  const hours = (h: number | null) => (h === null ? '—' : h < 48 ? `${h} hrs` : `${Math.round((h / 24) * 10) / 10} days`);
 
   return (
     <div className="space-y-6">
       <DashboardSummary
-        cases={cases}
+        overview={overview}
+        upcoming={upcoming}
+        upcomingCases={upcomingCases}
+        error={metricsError}
+        onRetry={onRetryMetrics}
         onNavigate={onNavigate}
         onSelectCase={onSelectCase}
       />
@@ -60,27 +64,36 @@ export function OverviewView({ cases, onSelectCase, onNavigate }: OverviewViewPr
           </div>
 
           <div className="space-y-3.5">
-            {FUNNEL_ORDER.map((step) => {
-              const count = cases.filter((c) => step.stages.includes(c.stage)).length;
-              const pct = totalCases > 0 ? Math.round((count / totalCases) * 100) : 0;
-              return (
-                <div key={step.label} className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-[#061B3A]">{step.label}</span>
-                    <span className="font-mono tabular-nums text-slate-600">
-                      {count} ({pct}%)
-                    </span>
-                  </div>
-                  <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-[#061B3A] to-[#009CA6] rounded-full transition-all duration-300"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
+            {(overview?.funnel ?? []).map((step) => (
+              <div key={step.key} className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-[#061B3A]">{step.label}</span>
+                  <span className="font-mono tabular-nums text-slate-600">
+                    {step.count} ({step.percent}%)
+                  </span>
                 </div>
-              );
-            })}
+                <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-[#061B3A] to-[#009CA6] rounded-full transition-all duration-300"
+                    style={{ width: `${step.percent}%` }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
+
+          {overview && (
+            <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100 text-xs">
+              <div>
+                <p className="text-slate-500">Median time to acknowledge</p>
+                <p className="font-mono font-semibold text-[#061B3A] tabular-nums">{hours(overview.medianHoursToAcknowledge)}</p>
+              </div>
+              <div>
+                <p className="text-slate-500">Median time to verified close</p>
+                <p className="font-mono font-semibold text-[#061B3A] tabular-nums">{hours(overview.medianHoursToClose)}</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Pathway Performance Table */}
@@ -114,25 +127,14 @@ export function OverviewView({ cases, onSelectCase, onNavigate }: OverviewViewPr
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
-                {pathways.map((pathway) => {
-                  const pCases = cases.filter((c) => c.pathway === pathway);
-                  const pAck = pCases.filter((c) => Boolean(c.milestones.facilityAcknowledgedAt)).length;
-                  const pClosed = pCases.filter((c) => c.status === 'Closed Verified').length;
-                  return (
-                    <tr key={pathway} className="hover:bg-slate-50/80">
-                      <td className="py-3 pr-3 font-medium text-[#061B3A]">{pathway}</td>
-                      <td className="py-3 px-3 text-right font-mono tabular-nums text-slate-700">
-                        {pCases.length}
-                      </td>
-                      <td className="py-3 px-3 text-right font-mono tabular-nums text-[#00828C]">
-                        {pAck}
-                      </td>
-                      <td className="py-3 pl-3 text-right font-mono tabular-nums text-emerald-700 font-semibold">
-                        {pClosed}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {pathwayRows.map((p) => (
+                  <tr key={p.pathway} className="hover:bg-slate-50/80">
+                    <td className="py-3 pr-3 font-medium text-[#061B3A]">{p.name}</td>
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-slate-700">{p.cases}</td>
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-[#00828C]">{p.acknowledged}</td>
+                    <td className="py-3 pl-3 text-right font-mono tabular-nums text-emerald-700 font-semibold">{p.closedVerified}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

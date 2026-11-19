@@ -122,6 +122,8 @@ enum ExportType {
   CASES_CSV
   /// The audit trail, with each event's hash so the file is independently verifiable.
   AUDIT_CSV
+  /// Programme performance by pathway and facility (funder / clinical-governance reporting).
+  GOVERNANCE_CSV
 }
 
 /// What an inbound patient reply was understood as. The reply TEXT is never stored.
@@ -167,6 +169,7 @@ model Organization {
   invites         Invite[]
   slaBreaches     SlaBreach[]
   notifications   Notification[]
+  reportSchedules ReportSchedule[]
   inboundMessages InboundMessage[]
 }
 
@@ -197,6 +200,7 @@ model User {
   recordedConsent Consent[]
   invitesSent     Invite[]        @relation("InviteInviter")
   notifications   Notification[]
+  reportSchedules ReportSchedule[]
 
   @@index([orgId, role])
   @@index([facilityId])
@@ -644,4 +648,29 @@ model Notification {
 
   @@index([userId, readAt, createdAt])
   @@index([orgId, createdAt])
+}
+
+enum ReportFrequency {
+  WEEKLY
+  MONTHLY
+}
+
+/// A recurring report. Each run queues an ordinary ExportJob (same worker, files, audit and download link).
+model ReportSchedule {
+  id          String          @id @default(cuid())
+  orgId       String
+  type        ExportType
+  frequency   ReportFrequency
+  enabled     Boolean         @default(true)
+  /// Who the generated exports belong to (and are audited as).
+  createdById String
+  nextRunAt   DateTime
+  lastRunAt   DateTime?
+  createdAt   DateTime        @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id])
+  createdBy User         @relation(fields: [createdById], references: [id])
+
+  @@index([enabled, nextRunAt])
+  @@index([orgId])
 }

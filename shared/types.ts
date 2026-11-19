@@ -285,12 +285,13 @@ export interface AuditVerifyResponse {
   reason?: string;
 }
 
-export type ExportType = 'CASES_CSV' | 'AUDIT_CSV';
+export type ExportType = 'CASES_CSV' | 'AUDIT_CSV' | 'GOVERNANCE_CSV';
 export type ExportStatus = 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'EXPIRED';
 
 export const EXPORT_LABELS: Record<ExportType, string> = {
   CASES_CSV: 'Live Referral Cohort CSV',
   AUDIT_CSV: 'Immutable Audit Trail CSV',
+  GOVERNANCE_CSV: 'Programme Performance Summary CSV',
 };
 
 export interface CreateExportRequest {
@@ -591,4 +592,83 @@ export interface UpdateContactRequest {
 export interface UpdateConsentRequest {
   channel: MessagingChannelId;
   granted: boolean;
+}
+
+
+// ───────────────────────────── Metrics and scheduled reports ─────────────────────────────
+
+/** Funnel steps, cumulative: a case counts in every step its stage has reached. Shared so the UI and the API agree. */
+export const FUNNEL_STEPS: ReadonlyArray<{ key: string; label: string; stages: readonly CaseStage[] }> = [
+  { key: 'INTAKE_ASSIGNED', label: '1. Intake & Assigned', stages: ['INTAKE', 'ASSIGNED', 'CONTACTED', 'HANDOFF_SENT', 'ACKNOWLEDGED', 'ATTENDED', 'ESCALATED', 'CLOSED'] },
+  { key: 'HANDOFF_SENT', label: '2. Facility Handoff Sent', stages: ['HANDOFF_SENT', 'ACKNOWLEDGED', 'ATTENDED', 'ESCALATED', 'CLOSED'] },
+  { key: 'ACKNOWLEDGED', label: '3. Facility Acknowledged', stages: ['ACKNOWLEDGED', 'ATTENDED', 'CLOSED'] },
+  { key: 'ATTENDED', label: '4. Patient Attended', stages: ['ATTENDED', 'CLOSED'] },
+  { key: 'CLOSED', label: '5. Verified Outcome Closed', stages: ['CLOSED'] },
+];
+
+export interface FunnelStepDto {
+  key: string;
+  label: string;
+  count: number;
+  /** Share of all referrals, rounded to a whole number. */
+  percent: number;
+}
+
+export interface PathwayMetricsDto {
+  pathway: PathwayId;
+  cases: number;
+  /** Facility has acknowledged (a milestone, so it stays true after the case moves on). */
+  acknowledged: number;
+  closedVerified: number;
+}
+
+export interface OverviewMetricsDto {
+  asOf: string;
+  total: number;
+  statusCounts: { active: number; awaitingAck: number; overdueSla: number; closedVerified: number };
+  /** Everything not yet closed with a verified outcome. */
+  activeReferrals: number;
+  /** Open referrals the facility has taken on (or that are late): waiting on a clinical endpoint. */
+  pendingCareCompletions: number;
+  attendedAwaitingOutcome: number;
+  /** Closed-verified share of all referrals, whole percent. */
+  completionRate: number;
+  funnel: FunnelStepDto[];
+  pathways: PathwayMetricsDto[];
+  /** Hours from referral issue to facility acknowledgement (median), null when nothing has been acknowledged. */
+  medianHoursToAcknowledge: number | null;
+  /** Hours from referral issue to documented outcome (median) over closed referrals. */
+  medianHoursToClose: number | null;
+  acknowledgedSample: number;
+  closedSample: number;
+}
+
+export interface UpcomingMetricsDto {
+  asOf: string;
+  /** Start of today in East Africa Time, as an instant. */
+  windowStart: string;
+  /** All matching referrals (the list below may be shorter). */
+  count: number;
+  cases: CaseDto[];
+}
+
+export type ReportType = 'CASES_CSV' | 'GOVERNANCE_CSV';
+export type ReportFrequency = 'WEEKLY' | 'MONTHLY';
+
+export interface ReportScheduleDto {
+  id: string;
+  type: ReportType;
+  frequency: ReportFrequency;
+  enabled: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  createdBy: string;
+}
+
+export interface CreateReportScheduleRequest {
+  type: ReportType;
+  frequency: ReportFrequency;
+}
+export interface UpdateReportScheduleRequest {
+  enabled: boolean;
 }
