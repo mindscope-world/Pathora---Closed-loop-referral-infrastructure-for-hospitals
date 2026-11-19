@@ -100,6 +100,8 @@ enum Lang {
 
 enum DeliveryStatus {
   QUEUED
+  /// Claimed by the message worker and being handed to the provider.
+  SENDING
   SENT
   DELIVERED
   READ
@@ -108,11 +110,26 @@ enum DeliveryStatus {
   HUMAN_ROUTED
 }
 
+enum SlaBreachKind {
+  /// The case's next-action deadline (ack SLA / evaluation target / barrier window) passed.
+  DEADLINE_PASSED
+  /// A red-flag referral went unacknowledged for longer than its pathway's red-flag timer.
+  RED_FLAG_UNACKNOWLEDGED
+}
+
 enum ExportType {
   /// Live referral cohort (one row per case).
   CASES_CSV
   /// The audit trail, with each event's hash so the file is independently verifiable.
   AUDIT_CSV
+}
+
+/// What an inbound patient reply was understood as. The reply TEXT is never stored.
+enum InboundKind {
+  OPT_OUT
+  RESTORE
+  CONFIRM
+  OTHER
 }
 
 enum ExportStatus {
@@ -132,20 +149,25 @@ model Organization {
   type          OrgType  @default(PROGRAMME)
   retentionDays Int      @default(365)
   dpoContact    String?
+  /// Programme support number substituted for {phone} in patient messages.
+  supportPhone  String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  users        User[]
-  facilities   Facility[]
-  patients     Patient[]
-  rulePacks    RulePack[]
-  cases        ReferralCase[]
-  templates    MessageTemplate[]
-  commsLogs    CommsLog[]
-  auditEvents  AuditEvent[]
-  exportJobs   ExportJob[]
-  refSequences RefSequence[]
-  invites      Invite[]
+  users           User[]
+  facilities      Facility[]
+  patients        Patient[]
+  rulePacks       RulePack[]
+  cases           ReferralCase[]
+  templates       MessageTemplate[]
+  commsLogs       CommsLog[]
+  auditEvents     AuditEvent[]
+  exportJobs      ExportJob[]
+  refSequences    RefSequence[]
+  invites         Invite[]
+  slaBreaches     SlaBreach[]
+  notifications   Notification[]
+  inboundMessages InboundMessage[]
 }
 
 model User {
@@ -174,6 +196,7 @@ model User {
   recordedMiles   CaseMilestone[]
   recordedConsent Consent[]
   invitesSent     Invite[]        @relation("InviteInviter")
+  notifications   Notification[]
 
   @@index([orgId, role])
   @@index([facilityId])
@@ -229,14 +252,20 @@ model Patient {
   /// Keyed-HMAC of each lowercased word of the name (server/lib/searchIndex.ts). Lets us find a
   /// patient by whole-word name without storing or indexing the plaintext name.
   nameTokens  String[] @default([])
+  /// Keyed HMAC of the normalised phone number (NOT organisation-scoped, on purpose): lets an inbound
+  /// STOP be matched to the patient, in every organisation that messaged that number, without keeping it in the clear.
+  phoneHash   String?
   createdAt   DateTime @default(now())
 
-  org     Organization   @relation(fields: [orgId], references: [id])
-  cases   ReferralCase[]
-  consent Consent[]
+  org       Organization     @relation(fields: [orgId], references: [id])
+  cases     ReferralCase[]
+  consent   Consent[]
+  commsLogs CommsLog[]
+  inbound   InboundMessage[]
 
   @@unique([orgId, patientCode])
   @@index([nameTokens], type: Gin)
+  @@index([phoneHash])
 }
 
 /// Append-only. Current consent for a channel = the latest row for (patientId, channel).
@@ -275,7 +304,12 @@ model RulePack {
   clinicalOwnerId String?
   redFlagRule     String
   closureCriteria String
+  /// Wording shown to people (`redFlagRule`) stays as written by the clinical owner; this is the
+  /// machine-readable form the SLA monitor actually enforces: { "unacknowledgedHours": number | null }.
+  redFlagPolicy   Json           @default("{\"unacknowledgedHours\": null}")
   effectiveFrom   DateTime       @default(now())
+  /// Who approved this version (the clinical lead who saved it); null for seeded/default packs.
+  editedById      String?
   createdAt       DateTime       @default(now())
 
   org           Organization   @relation(fields: [orgId], references: [id])
@@ -324,8 +358,9 @@ model ReferralCase {
   coordinator User         @relation("CaseCoordinator", fields: [coordinatorId], references: [id])
   facility    Facility     @relation(fields: [facilityId], references: [id])
 
-  milestones CaseMilestone[]
-  commsLogs  CommsLog[]
+  milestones  CaseMilestone[]
+  commsLogs   CommsLog[]
+  slaBreaches SlaBreach[]
 
   @@unique([orgId, refNumber])
   @@index([orgId, stage])
@@ -363,18 +398,22 @@ model RefSequence {
 // ───────────────────────────── Communications ─────────────────────────────
 
 model MessageTemplate {
-  id         String    @id @default(cuid())
-  orgId      String
-  name       String
+  id           String    @id @default(cuid())
+  orgId        String
+  name         String
   /// null = applies to all pathways.
-  pathway    Pathway?
-  channel    Channel
-  language   Lang
-  body       String
-  reviewedBy String
-  /// Only approved templates may be sent.
-  approvedAt DateTime?
-  createdAt  DateTime  @default(now())
+  pathway      Pathway?
+  channel      Channel
+  language     Lang
+  body         String
+  reviewedBy   String
+  /// Only approved templates may be sent. Editing the wording clears this: it must be approved again.
+  approvedAt   DateTime?
+  approvedById String?
+  /// Retired templates can no longer be sent but stay for the history of what was sent.
+  retiredAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   org       Organization @relation(fields: [orgId], references: [id])
   commsLogs CommsLog[]
@@ -386,22 +425,57 @@ model CommsLog {
   id                String         @id @default(cuid())
   orgId             String
   caseId            String
+  patientId         String
   channel           Channel
   templateId        String?
   /// Snapshot of the template name, so the log survives template edits and covers
   /// non-template actions such as human coordinator calls.
   templateName      String
+  /// The exact text sent (placeholders filled in). Contains no clinical terms or patient details.
+  body              String?
   status            DeliveryStatus
   providerMessageId String?
-  sentAt            DateTime       @default(now())
+  /// Short, user-safe reason when delivery failed or was handed to a person.
+  failureReason     String?
+  attempts          Int            @default(0)
+  /// When a QUEUED message may next be attempted (later than now during quiet hours or backoff).
+  nextAttemptAt     DateTime?
+  requestedById     String?
+  requestedAt       DateTime       @default(now())
+  /// When the provider accepted the message.
+  sentAt            DateTime?
+  updatedAt         DateTime       @updatedAt
 
   org      Organization     @relation(fields: [orgId], references: [id])
   case     ReferralCase     @relation(fields: [caseId], references: [id])
+  patient  Patient          @relation(fields: [patientId], references: [id])
   template MessageTemplate? @relation(fields: [templateId], references: [id])
 
-  @@index([orgId, sentAt])
+  @@index([orgId, requestedAt])
   @@index([caseId])
+  @@index([patientId, requestedAt])
   @@index([providerMessageId])
+  @@index([status, nextAttemptAt])
+}
+
+/// A patient's reply to an automated message. Only what the reply MEANT is kept, never what it said:
+/// free text from a patient can contain clinical details the system must not hold.
+model InboundMessage {
+  id                String      @id @default(cuid())
+  orgId             String
+  patientId         String
+  caseId            String?
+  /// Provider's id for the inbound message; with patientId it makes a re-delivered webhook a no-op.
+  providerMessageId String
+  channel           Channel
+  kind              InboundKind
+  receivedAt        DateTime    @default(now())
+
+  org     Organization @relation(fields: [orgId], references: [id])
+  patient Patient      @relation(fields: [patientId], references: [id])
+
+  @@unique([providerMessageId, patientId])
+  @@index([orgId, receivedAt])
 }
 
 // ───────────────────────────── Audit & exports ─────────────────────────────
@@ -532,4 +606,42 @@ model Invite {
 
   @@index([orgId, createdAt])
   @@index([orgId, email])
+}
+
+/// One row per missed deadline. (caseId, kind, deadline) is unique, so the monitor reports each
+/// missed deadline exactly once however often it runs and however many instances run it. When a
+/// barrier is resolved the case gets a NEW deadline, which can legitimately breach again.
+model SlaBreach {
+  id         String        @id @default(cuid())
+  orgId      String
+  caseId     String
+  kind       SlaBreachKind
+  deadline   DateTime
+  detectedAt DateTime      @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id])
+  case ReferralCase @relation(fields: [caseId], references: [id])
+
+  @@unique([caseId, kind, deadline])
+  @@index([orgId, detectedAt])
+}
+
+/// In-app notifications. Text never contains patient names or identifiers beyond the referral number.
+model Notification {
+  id        String    @id @default(cuid())
+  orgId     String
+  userId    String
+  kind      String
+  title     String
+  body      String
+  /// Referral number the notification is about, so the UI can open it.
+  caseRef   String?
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  org  Organization @relation(fields: [orgId], references: [id])
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([orgId, createdAt])
 }

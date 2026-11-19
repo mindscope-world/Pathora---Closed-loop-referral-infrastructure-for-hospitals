@@ -31,12 +31,16 @@ const schema = z.object({
   AT_USERNAME: z.string().optional(),
   AT_API_KEY: z.string().optional(),
   AT_SENDER_ID: z.string().optional(),
+  /** Override for the sandbox (https://api.sandbox.africastalking.com). */
+  AT_BASE_URL: z.string().url().optional(),
+  /** Shared secret the provider puts on webhook URLs (?secret=…). Webhooks are disabled without it. */
+  MESSAGING_WEBHOOK_SECRET: z.string().min(24, 'must be at least 24 characters').optional(),
 
   // Optional server-side Gemini key (Phase 9).
   GEMINI_API_KEY: z.string().optional(),
 }).superRefine((env, ctx) => {
   if (env.MESSAGING_PROVIDER === 'africastalking') {
-    for (const key of ['AT_USERNAME', 'AT_API_KEY'] as const) {
+    for (const key of ['AT_USERNAME', 'AT_API_KEY', 'MESSAGING_WEBHOOK_SECRET'] as const) {
       if (!env[key]) {
         ctx.addIssue({ code: 'custom', path: [key], message: `required when MESSAGING_PROVIDER=africastalking` });
       }

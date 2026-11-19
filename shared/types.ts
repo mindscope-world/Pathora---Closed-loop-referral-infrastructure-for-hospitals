@@ -123,6 +123,8 @@ export interface CaseDto {
   notes: string;
   closureReason: string | null;
   outcomeSource: string | null;
+  /** A mobile number is on file for the patient (the number itself is never returned). */
+  hasPhone: boolean;
   milestones: CaseMilestonesDto;
   /** Optimistic-lock counter; send back as `expectedVersion` to detect concurrent edits. */
   version: number;
@@ -192,6 +194,8 @@ export interface CreateCaseRequest {
   redFlag?: boolean;
   /** Patient has consented to SMS follow-up (recorded as a consent event). */
   consentSms?: boolean;
+  /** Patient's mobile number (any common Kenyan format). Stored encrypted. */
+  patientPhone?: string;
   notes?: string;
 }
 
@@ -215,7 +219,7 @@ export interface ReassignCaseRequest extends CaseActionRequest {
 }
 
 export interface ImportCasesRequest {
-  /** CSV text: patientCode, cohortLabel, pathway, sourceProgram, owner, facility[, patientName]. */
+  /** CSV text: patientCode, cohortLabel, pathway, sourceProgram, owner, facility[, patientName[, mobileNumber]]. */
   csv: string;
   /** Validate and report only; write nothing. */
   dryRun?: boolean;
@@ -400,6 +404,8 @@ export interface OrganizationDto {
   id: string;
   name: string;
   dpoContact: string | null;
+  /** Programme support number, substituted for {phone} in patient messages. */
+  supportPhone: string | null;
   retentionDays: number;
   createdAt: string;
 }
@@ -407,6 +413,7 @@ export interface OrganizationDto {
 export interface UpdateOrganizationRequest {
   name?: string;
   dpoContact?: string | null;
+  supportPhone?: string | null;
   retentionDays?: number;
 }
 
@@ -415,4 +422,173 @@ export interface FacilityInput {
   type: FacilityDto['type'];
   city: string;
   interopMethod: FacilityDto['interopMethod'];
+}
+
+// ───────────────────────────── Rule packs, SLA monitor, notifications ─────────────────────────────
+
+export type RulePackStatus = 'ACTIVE' | 'CONFIGURED' | 'COMING_SOON';
+
+/** The machine-readable red-flag rule the SLA monitor enforces. */
+export interface RedFlagPolicy {
+  /**
+   * Escalate a red-flagged referral to a human if the receiving facility has not acknowledged it within
+   * this many hours of issue. null = no timer (the pathway routes red flags by other means).
+   */
+  unacknowledgedHours: number | null;
+}
+
+export interface RulePackDto {
+  /** Stable key (e.g. RP-CANCER); identifies the pack across its versions. */
+  id: string;
+  name: string;
+  pathway: PathwayId;
+  version: number;
+  status: RulePackStatus;
+  ackSlaHours: number;
+  contactSlaHours: number;
+  evalTargetDays: number;
+  clinicalOwner: { id: string; name: string } | null;
+  /** Wording written by the clinical owner, shown to people. */
+  redFlagRule: string;
+  /** What the monitor enforces. */
+  redFlagPolicy: RedFlagPolicy;
+  closureCriteria: string;
+  effectiveFrom: string;
+}
+
+export interface RulePackListResponse {
+  rulePacks: RulePackDto[];
+  /** Active clinical leads who can be named as a pack's clinical owner. */
+  clinicalLeads: Array<{ id: string; name: string }>;
+}
+
+export interface RulePackVersionDto extends RulePackDto {
+  /** Who approved this version (null for the initial, seeded version). */
+  editedBy: string | null;
+}
+
+export interface UpdateRulePackRequest {
+  ackSlaHours?: number;
+  contactSlaHours?: number;
+  evalTargetDays?: number;
+  redFlagRule?: string;
+  redFlagPolicy?: RedFlagPolicy;
+  closureCriteria?: string;
+  clinicalOwnerId?: string | null;
+  status?: RulePackStatus;
+  /** If set and stale, the server answers 409 instead of overwriting a newer version. */
+  expectedVersion?: number;
+}
+
+export interface SyntheticCheck {
+  id: string;
+  title: string;
+  outcome: 'PASSED' | 'FAILED' | 'SKIPPED';
+  detail: string;
+}
+
+export interface SyntheticTestResponse {
+  rulePack: { id: string; name: string; version: number };
+  ranAt: string;
+  /** true when no check FAILED (skipped checks do not fail a run). */
+  passed: boolean;
+  checks: SyntheticCheck[];
+}
+
+export interface NotificationDto {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  caseRef: string | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface NotificationsResponse {
+  notifications: NotificationDto[];
+  unread: number;
+}
+
+/** Referral cases that need attention: overdue, escalated, red-flagged, or due within about 12 hours. */
+export const ESCALATION_WINDOW_HOURS = 12;
+
+// ───────────────────────────── Patient communications ─────────────────────────────
+
+export type MessagingChannelId = 'SMS' | 'WHATSAPP';
+export type LanguageId = 'ENGLISH' | 'KISWAHILI';
+export type TemplateStatus = 'DRAFT' | 'APPROVED' | 'RETIRED';
+
+export const LANGUAGE_LABELS: Record<LanguageId, string> = { ENGLISH: 'English', KISWAHILI: 'Kiswahili' };
+export const CHANNEL_LABELS: Record<MessagingChannelId | 'VOICE', string> = { SMS: 'SMS', WHATSAPP: 'WhatsApp', VOICE: 'Voice Call' };
+
+export interface TemplateDto {
+  id: string;
+  name: string;
+  /** null = usable for any pathway. */
+  pathway: PathwayId | null;
+  channel: MessagingChannelId;
+  language: LanguageId;
+  body: string;
+  /** Only APPROVED templates can be sent. Editing the wording returns a template to DRAFT. */
+  status: TemplateStatus;
+  reviewedBy: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  /** Placeholders the wording uses, e.g. ["facility", "phone"]. */
+  placeholders: string[];
+}
+
+export interface TemplateInput {
+  name: string;
+  pathway: PathwayId | null;
+  channel: MessagingChannelId;
+  language: LanguageId;
+  body: string;
+}
+
+export type DeliveryStatusId = 'QUEUED' | 'SENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED' | 'BLOCKED_OPTOUT' | 'HUMAN_ROUTED';
+
+export interface CommsLogDto {
+  id: string;
+  /** Referral number the message belongs to. */
+  caseId: string;
+  patientCode: string;
+  channel: MessagingChannelId | 'VOICE';
+  templateName: string;
+  status: DeliveryStatusId;
+  requestedAt: string;
+  /** When the provider accepted it; null until then. */
+  sentAt: string | null;
+  /** For QUEUED messages: when it will be tried (later than now during quiet hours or between retries). */
+  scheduledFor: string | null;
+  failureReason: string | null;
+  attempts: number;
+}
+
+export interface CommsLogResponse {
+  entries: CommsLogDto[];
+  nextCursor: string | null;
+}
+
+export interface SendMessageRequest {
+  templateId: string;
+  channel: MessagingChannelId;
+}
+
+export interface SendMessageResponse {
+  entry: CommsLogDto;
+  /** true = queued for delivery. false = refused or handed to a person (see `message`). */
+  accepted: boolean;
+  message: string;
+}
+
+export interface UpdateContactRequest {
+  /** Mobile number in any common Kenyan format, or null to remove it. */
+  phone: string | null;
+}
+
+export interface UpdateConsentRequest {
+  channel: MessagingChannelId;
+  granted: boolean;
 }

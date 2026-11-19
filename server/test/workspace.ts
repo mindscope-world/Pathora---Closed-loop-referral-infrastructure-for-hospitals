@@ -88,3 +88,39 @@ export async function advance(ws: Workspace, ref: string, to: 'ack' | 'attended'
   if (to === 'closed') last = (await act(focal, ref, 'close', { closureReason: 'Clinical evaluation completed' }).expect(200)).body;
   return last;
 }
+
+// ───────────────────────────── patient messaging helpers ─────────────────────────────
+import { getProvider } from '../messaging/provider';
+import { MockProvider } from '../messaging/mock';
+import { setClock } from '../lib/clock';
+import type { TemplateDto, TemplateInput } from '../../shared/types';
+
+export const mockProvider = () => getProvider() as MockProvider;
+
+/** 10:00 East Africa Time today: inside sending hours whatever time of day the suite runs. */
+export const daytime = (hour = 10, minute = 0) => {
+  const eat = new Date(Date.now() + 3 * 3_600_000);
+  return new Date(Date.UTC(eat.getUTCFullYear(), eat.getUTCMonth(), eat.getUTCDate(), hour - 3, minute));
+};
+export const useClock = (at: Date) => setClock(() => at);
+export const resetClock = () => setClock(undefined);
+
+export const DISCREET = 'Hello, this is your care coordinator. Your follow-up slot is ready at {facility}. Reply 1 to confirm or call {phone} for support.';
+
+/** Drafts a template as the manager and approves it as the clinical lead. */
+export async function approvedTemplate(ws: Workspace, over: Partial<TemplateInput> = {}): Promise<TemplateDto> {
+  const body = { name: `Template ${Math.random().toString(36).slice(2, 8)}`, pathway: null, channel: 'SMS' as const, language: 'ENGLISH' as const, body: DISCREET, ...over };
+  const created = await request(app).post('/api/templates').set(as(ws.manager)).send(body);
+  if (created.status !== 201) throw new Error(`template create failed: ${created.status} ${JSON.stringify(created.body)}`);
+  const approved = await request(app).post(`/api/templates/${created.body.id}/approve`).set(as(ws.clinical));
+  if (approved.status !== 200) throw new Error(`template approve failed: ${approved.status} ${JSON.stringify(approved.body)}`);
+  return approved.body;
+}
+
+/** Sets the programme support number, which templates using {phone} need. */
+export const setSupportPhone = (ws: Workspace, phone = '0700 000 000') =>
+  request(app).patch('/api/organization').set(as(ws.manager)).send({ supportPhone: phone }).expect(200);
+
+let phoneSeq = 0;
+/** A valid, unique Kenyan mobile number. Each test FILE passes its own block: files share one database, and inbound replies match numbers across it. */
+export const uniquePhone = (block: string) => `${block}${String(++phoneSeq).padStart(6, '0')}`;

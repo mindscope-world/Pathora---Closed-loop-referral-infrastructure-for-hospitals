@@ -38,5 +38,5 @@ export function verifyDownloadToken(token: string, jobId: string, nowMs: number 
   }
 }
 
-/** Replaces download tokens in a URL so they never reach the logs. */
-export const redactToken = (url: string) => url.replace(/([?&]token=)[^&#]*/g, '$1[redacted]');
+/** Replaces secrets carried in a URL (download tokens, webhook secrets) so they never reach the logs. */
+export const redactToken = (url: string) => url.replace(/([?&](?:token|secret)=)[^&#]*/g, '$1[redacted]');

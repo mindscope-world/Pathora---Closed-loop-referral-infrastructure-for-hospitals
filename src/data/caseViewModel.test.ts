@@ -8,7 +8,7 @@ const dto = (over: Partial<CaseDto> = {}): CaseDto => ({
   facility: { id: 'f1', name: 'Kenyatta Referral Outpatient Desk' }, stage: 'HANDOFF_SENT', status: 'AWAITING_ACK',
   consentSms: true, consentWhatsApp: false, optedOut: false,
   createdAt: '2026-11-17T06:15:00.000Z', dueDate: '2026-11-23T21:00:00.000Z', slaDueAt: '2026-11-18T06:20:00.000Z',
-  slaHoursRemaining: 18, redFlag: true, notes: 'n', closureReason: null, outcomeSource: null,
+  slaHoursRemaining: 18, redFlag: true, notes: 'n', closureReason: null, outcomeSource: null, hasPhone: true,
   milestones: { referralIssuedAt: '2026-11-17T06:20:00.000Z' }, version: 3, ...over,
 });
 

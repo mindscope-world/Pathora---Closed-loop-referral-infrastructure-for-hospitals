@@ -43,6 +43,7 @@ function OrganisationCard({ canManage }: { canManage: boolean }) {
   const [org, setOrg] = useState<OrganizationDto | null>(null);
   const [name, setName] = useState('');
   const [dpo, setDpo] = useState('');
+  const [supportPhone, setSupportPhone] = useState('');
   const [retention, setRetention] = useState('365');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +54,7 @@ function OrganisationCard({ canManage }: { canManage: boolean }) {
     setOrg(o);
     setName(o.name);
     setDpo(o.dpoContact ?? '');
+    setSupportPhone(o.supportPhone ?? '');
     setRetention(String(o.retentionDays));
   };
 
@@ -65,7 +67,7 @@ function OrganisationCard({ canManage }: { canManage: boolean }) {
     return () => { alive = false; };
   }, []);
 
-  const dirty = org !== null && (name !== org.name || dpo !== (org.dpoContact ?? '') || retention !== String(org.retentionDays));
+  const dirty = org !== null && (name !== org.name || dpo !== (org.dpoContact ?? '') || supportPhone !== (org.supportPhone ?? '') || retention !== String(org.retentionDays));
 
   const save = async () => {
     if (!org || saving) return;
@@ -78,7 +80,7 @@ function OrganisationCard({ canManage }: { canManage: boolean }) {
     setError(null);
     setSaved(false);
     try {
-      apply(await admin.updateOrganization({ name, dpoContact: dpo, retentionDays: days }));
+      apply(await admin.updateOrganization({ name, dpoContact: dpo, supportPhone, retentionDays: days }));
       setSaved(true);
     } catch (err) {
       setError(describeApiError(err));
@@ -102,7 +104,7 @@ function OrganisationCard({ canManage }: { canManage: boolean }) {
 
       {status === 'ready' && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <div>
               <label htmlFor="org-name" className="block text-xs font-semibold text-[#061B3A] mb-1">Partner Organisation</label>
               <input id="org-name" className={input} value={name} disabled={!canManage} maxLength={160}
@@ -112,6 +114,12 @@ function OrganisationCard({ canManage }: { canManage: boolean }) {
               <label htmlFor="org-dpo" className="block text-xs font-semibold text-[#061B3A] mb-1">Data Protection Contact</label>
               <input id="org-dpo" className={input} value={dpo} disabled={!canManage} maxLength={200} placeholder="Name (email)"
                 onChange={(e) => { setDpo(e.target.value); setSaved(false); }} />
+            </div>
+            <div>
+              <label htmlFor="org-support" className="block text-xs font-semibold text-[#061B3A] mb-1">Patient Support Phone</label>
+              <input id="org-support" className={`${input} font-mono`} value={supportPhone} disabled={!canManage} maxLength={30} placeholder="0700 000 000"
+                onChange={(e) => { setSupportPhone(e.target.value); setSaved(false); }} />
+              <p className="mt-1 text-[11px] text-slate-500">Shown to patients where a message says {'{phone}'}.</p>
             </div>
             <div>
               <label htmlFor="org-retention" className="block text-xs font-semibold text-[#061B3A] mb-1">Audit Retention Window (Days)</label>

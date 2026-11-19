@@ -14,20 +14,22 @@ export const updateOrganizationSchema = z
     name: printableText(2, 160, 'Enter the organisation name').optional(),
     // Empty text clears the contact.
     dpoContact: printableText(0, 200, '').transform((v) => (v === '' ? null : v)).nullable().optional(),
+    // Substituted into patient messages as {phone}, so keep it short and single-line.
+    supportPhone: printableText(0, 30, '').transform((v) => (v === '' ? null : v)).nullable().optional(),
     retentionDays: z.number().int('Use a whole number of days').min(RETENTION_MIN_DAYS, `Retention must be at least ${RETENTION_MIN_DAYS} days`)
       .max(RETENTION_MAX_DAYS, `Retention must be at most ${RETENTION_MAX_DAYS} days`).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' });
 
 export const toOrganizationDto = (o: Organization): OrganizationDto => ({
-  id: o.id, name: o.name, dpoContact: o.dpoContact, retentionDays: o.retentionDays, createdAt: o.createdAt.toISOString(),
+  id: o.id, name: o.name, dpoContact: o.dpoContact, supportPhone: o.supportPhone, retentionDays: o.retentionDays, createdAt: o.createdAt.toISOString(),
 });
 
 export async function getOrganization(auth: AuthContext): Promise<OrganizationDto> {
   return toOrganizationDto(await prisma.organization.findUniqueOrThrow({ where: { id: auth.orgId } }));
 }
 
-const LABELS = { name: 'Organisation name', dpoContact: 'Data protection contact', retentionDays: 'Retention window (days)' } as const;
+const LABELS = { name: 'Organisation name', dpoContact: 'Data protection contact', supportPhone: 'Support phone', retentionDays: 'Retention window (days)' } as const;
 
 export async function updateOrganization(auth: AuthContext, patch: z.infer<typeof updateOrganizationSchema>): Promise<OrganizationDto> {
   return prisma.$transaction(async (tx) => {

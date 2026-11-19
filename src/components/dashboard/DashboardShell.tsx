@@ -22,13 +22,10 @@ import { AuthUserSession, useAuth } from '../../auth/AuthProvider';
 import { can, type Permission } from '../../../shared/permissions';
 import { PATHWAY_LABELS, type CaseDto, type ImportCasesResponse, type PathwayId } from '../../../shared/types';
 import * as workspaceApi from '../../api/workspace';
+import * as commsApi from '../../api/comms';
 import { ApiError } from '../../lib/api';
 import { describeApiError, useWorkspace } from '../../data/useWorkspace';
 import {
-  CommsLogEntry,
-  INITIAL_COMMS_LOG,
-  INITIAL_RULE_PACKS,
-  PathwayRulePack,
 } from '../../data/dashboardData';
 import { OverviewView } from './OverviewView';
 import { CasesView } from './CasesView';
@@ -37,6 +34,7 @@ import { EscalationsView } from './EscalationsView';
 import { CommsConsentView } from './CommsConsentView';
 import { PathwaysView } from './PathwaysView';
 import { AuditView } from './AuditView';
+import { NotificationBell } from './NotificationBell';
 import { SettingsView } from './SettingsView';
 import { ReferralProgressTracker, deriveReferralJourney } from './ReferralProgressTracker';
 
@@ -55,14 +53,6 @@ interface DashboardShellProps {
   onExitDashboard: () => void;
 }
 
-function nowTimestamp(): string {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(
-    now.getHours()
-  )}:${pad(now.getMinutes())}`;
-}
-
 export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellProps) {
   const { user } = useAuth();
   const role = user?.role;
@@ -76,10 +66,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   const ws = useWorkspace(role);
   const { cases, facilities, assignees } = ws;
 
-  // Still demo data until their phases land: comms log (Phase 7) and rule packs (Phase 6).
-  // (The audit trail is real: the server records every action itself; see AuditView.)
-  const [commsLog, setCommsLog] = useState<CommsLogEntry[]>(INITIAL_COMMS_LOG);
-  const [rulePacks, setRulePacks] = useState<PathwayRulePack[]>(INITIAL_RULE_PACKS);
+  // Everything on this dashboard is server-backed. The audit trail records each action itself (see AuditView).
 
   // Global Header Search State
   const [globalQuery, setGlobalQuery] = useState('');
@@ -104,6 +91,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   const [newPatientName, setNewPatientName] = useState('');
   const [newPatientCode, setNewPatientCode] = useState('');
   const [newPatientLabel, setNewPatientLabel] = useState('');
+  const [newPatientPhone, setNewPatientPhone] = useState('');
   const [newPathway, setNewPathway] = useState<PathwayId>('CANCER_SCREENING');
   const [newSourceProgram, setNewSourceProgram] = useState('Nairobi Mobile Screening');
   const [newCoordinator, setNewCoordinator] = useState('');
@@ -189,27 +177,8 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
     await run(() => workspaceApi.reassignCase(caseId, coordinatorId, versionOf(caseId)));
   };
 
-  const handleSendMessage = (
-    caseId: string,
-    channel: 'SMS' | 'WhatsApp',
-    templateName: string
-  ) => {
-    const target = cases.find((c) => c.id === caseId);
-    if (!target) return;
-    const status = target.optedOut ? 'Blocked (Opt-out)' : 'Delivered';
-
-    setCommsLog((prev) => [
-      {
-        id: `MSG-${900 + prev.length + 1}`,
-        caseId,
-        patientCode: target.patientCode,
-        channel,
-        templateName,
-        deliveryStatus: status,
-        timestamp: nowTimestamp(),
-      },
-      ...prev,
-    ]);
+  const handleSetChannelConsent = async (caseId: string, channel: 'SMS' | 'WHATSAPP', granted: boolean) => {
+    await run(() => commsApi.setChannelConsent(caseId, { channel, granted }));
   };
 
   const handleToggleOptOut = async (caseId: string) => {
@@ -217,18 +186,6 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
     if (!target) return;
     const nextOptOut = !target.optedOut;
     await run(() => workspaceApi.setOptOut(caseId, nextOptOut));
-  };
-
-  const handleUpdateRulePackSla = (
-    id: string,
-    ackSlaHours: number,
-    evalTargetDays: number
-  ) => {
-    setRulePacks((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, ackSlaHours, evalTargetDays } : p
-      )
-    );
   };
 
   const handleCreateNewCase = async (e: FormEvent) => {
@@ -250,6 +207,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           patientName: newPatientName.trim() || undefined,
           patientCode: newPatientCode.trim() || undefined,
           patientLabel: newPatientLabel.trim() || undefined,
+          patientPhone: newPatientPhone.trim() || undefined,
           pathway: newPathway,
           sourceProgram: newSourceProgram.trim(),
           coordinatorId: newCoordinator,
@@ -264,6 +222,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
       setNewPatientName('');
       setNewPatientCode('');
       setNewPatientLabel('');
+      setNewPatientPhone('');
       setNewRedFlag(false);
       setNewCaseModalOpen(false);
       setActiveTab('cases');
@@ -578,6 +537,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           })()}
 
           <div className="flex items-center gap-2.5 shrink-0">
+            <NotificationBell onOpenCase={(ref) => setSelectedCaseId(ref)} />
             {allowed('cases.import') && (
             <button
               type="button"
@@ -670,17 +630,17 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           {activeTab === 'comms' && (
             <CommsConsentView
               cases={cases}
-              commsLog={commsLog}
-              onSendMessage={handleSendMessage}
-              onToggleOptOut={handleToggleOptOut}
+              canSend={allowed('comms.send')}
               canManageConsent={allowed('consent.manage')}
+              canManageTemplates={allowed('templates.manage')}
+              canApproveTemplates={allowed('templates.approve')}
+              onToggleOptOut={handleToggleOptOut}
+              onSetChannelConsent={handleSetChannelConsent}
+              onCasesChanged={() => void ws.reload(true)}
             />
           )}
           {activeTab === 'pathways' && (
-            <PathwaysView
-              rulePacks={rulePacks}
-              onUpdateRulePackSla={handleUpdateRulePackSla}
-            />
+            <PathwaysView canEdit={allowed('rulepacks.edit')} />
           )}
           {activeTab === 'audit' && (
             <AuditView canExport={allowed('exports.create')} />
@@ -986,6 +946,22 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                 </div>
               </div>
 
+              <div>
+                <label htmlFor="new-phone" className="block font-semibold text-[#061B3A] mb-1">
+                  Patient mobile number <span className="font-normal text-slate-500">(optional, for consented SMS follow-up)</span>
+                </label>
+                <input
+                  id="new-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="off"
+                  value={newPatientPhone}
+                  onChange={(e) => setNewPatientPhone(e.target.value)}
+                  placeholder="0712 345 678"
+                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg font-mono"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-[#061B3A] mb-1">Pathway</label>
@@ -1103,7 +1079,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                   Phase 1 Secure CSV Batch Intake
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Format: PatientCode, CohortLabel, Pathway, SourceProgram, Owner, Facility [, PatientName]
+                  Format: PatientCode, CohortLabel, Pathway, SourceProgram, Owner, Facility [, PatientName [, MobileNumber]]
                 </p>
               </div>
               <button

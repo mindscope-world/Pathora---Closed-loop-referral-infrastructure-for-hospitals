@@ -383,6 +383,16 @@ Each phase ends in something demoable and testable. Phases 0–4 give a usable c
 
 **Exit:** a case left unacknowledged past its SLA automatically appears in the escalation queue with an audit entry. No manual trigger is needed.
 
+> **Phase 6 as built** (differences from the steps above, and why)
+> - **Pack ids are the stable key** (`RP-CANCER`), not a row id, so the URL survives new versions. `PATCH` publishes a new version row; earlier versions are never edited, every open referral stays pinned to the version it was created under, and the audit entry says so. `GET /rule-packs/:key/versions` is the approval history (who approved which version).
+> - **Bounds are enforced on the server and checked together:** acknowledgment and contact 1-168h, evaluation 1-90 days, red-flag timer 1-168h; contact <= acknowledgment, evaluation target after the acknowledgment deadline, red-flag timer within the evaluation target. Activating a pathway requires a named clinical owner (a Partner Clinical Lead).
+> - **Red-flag rules are structured** (`redFlagPolicy.unacknowledgedHours`), enforced by the monitor; the original wording stays for display. Cancer = 24h, NCD = 4h; the male-health and MCH wording describes routing, not a timer, so they have none.
+> - **The monitor** records each missed deadline once (`SlaBreach`, unique per case + kind + deadline: safe under concurrent runs and multiple instances) and audits it as `SLA_BREACH_DETECTED`. Red-flag breaches additionally **escalate the referral** (`SLA_ESCALATION_TRIGGERED`). It never overrides a person: once someone clears an escalation the same deadline is not escalated again. A resolved barrier gives a new deadline, which can breach again.
+> - **Notifications:** in-app (bell + `GET /notifications`), plus plain-text email when SMTP is configured. Text carries the referral number and facility only, never patient details. Recipients: the case owner, and the pack's clinical owner (or every active clinical lead if none is named).
+> - **The synthetic gate test is real.** The old screen printed four hard-coded "success" lines whatever the rules were, including a "failed-contact fallback" that does not exist yet. The new one runs the actual monitor against fixture referrals inside a transaction that is always rolled back, reports PASSED / FAILED / SKIPPED per check using the pack's own numbers, then verifies nothing was left behind. The only trace is one `RULE_PACK_GATE_TESTED` audit entry. The failed-contact fallback check returns with Phase 7.
+> - **`GET /escalations`** implements the dashboard's attention rule server-side (a test proves both agree); the screen itself still filters the case list it already holds.
+> - **Not done:** applying a changed SLA to referrals that are already open (deliberately: they keep their pinned rules).
+
 ### Phase 7: Patient communications and consent (2.5 days)
 1. Templates: CRUD with an approval workflow (`reviewedBy`, `approvedAt`). Only approved templates can be sent. Validate placeholders. Lint that bodies contain no clinical terms.
 2. `POST /cases/:id/messages {templateId, channel}`:
@@ -396,6 +406,17 @@ Each phase ends in something demoable and testable. Phases 0–4 give a usable c
 8. **Frontend:** `CommsConsentView` calls the real endpoints. The delivery log polls or uses SSE.
 
 **Exit:** an opted-out patient cannot be messaged by any path. Delivery receipts update the log.
+
+> **Phase 7 as built** (differences from the steps above, and why)
+> - **Consent is enforced twice.** At request time (`POST /cases/:id/messages`) per channel (SMS consent does not allow WhatsApp; an opt-out blocks everything), and again at the moment of sending, because a patient can reply STOP between queueing and sending. A refusal is recorded in the delivery log, audited, and handed to a person (a notification to the case owner); it never just disappears. The old screen recorded "Delivered" for everything and only looked at the case-level opt-out.
+> - **Nothing is sent from the request.** Messages are queued; a worker (database-backed queue, `FOR UPDATE SKIP LOCKED`, safe across instances) delivers them. Quiet hours (21:00-07:00 EAT), a limit of 3 automated messages per patient per 24h (race-safe), and retries with backoff (1 min, 5 min, 30 min, 2 h, then give up) all live there. A retry is never scheduled into quiet hours.
+> - **A missed message is better than a duplicate.** If a worker dies mid-send we cannot know whether the provider accepted the message, so it is marked failed and a person is asked to check; it is not retried.
+> - **Templates have an approval workflow:** staff draft, the Partner Clinical Lead approves, only approved templates can be sent, and editing approved wording withdraws the approval. Wording is linted (no clinical terms in English or Kiswahili, no links, only `{facility}` and `{phone}`), and re-checked at approval and again at send time. The lint flagged the demo template TPL-01 ("...from the screening team"): "screening" reveals a health screening to anyone reading a lock screen, so the demo wording was changed. Remove "screening"/"screened" from `CLINICAL_TERMS` if your clinical advisers disagree.
+> - **Patient phone numbers** did not exist anywhere. They are captured at intake (form, CSV column 8, or `PUT /cases/:id/contact`), normalised to E.164, stored encrypted, never returned by the API (only `hasPhone`) and never written to the audit trail or logs. A keyed hash (deliberately not organisation-scoped) lets a reply find the patient.
+> - **Webhooks** (`/api/webhooks/messaging/delivery|inbound`) are authenticated by a shared secret on the URL (`MESSAGING_WEBHOOK_SECRET`, redacted from logs). Receipts only move a message forward (a late "Sent" cannot undo "Delivered"). Patient replies are understood by keyword (STOP/ACHA, START/ANZA, 1/NDIYO) and **the reply text is never stored**; STOP applies to every programme that has been messaging that number.
+> - **Provider:** an Africa's Talking SMS adapter, written from the provider's documented API and tested against recorded-style responses only. It has never talked to the live service: verify against the AT sandbox (`AT_BASE_URL`) before go-live. WhatsApp is not wired to any provider yet (such a request is handed to a person). A mock provider is used in development and tests and simulates delivery receipts in development.
+> - **Synthetic gate test** gained the two checks Phase 6 promised: a patient who opted out is never messaged, and an undeliverable message reaches a person.
+> - **Not done:** inbound WhatsApp, voice calls, per-organisation quiet hours, and deleting/ageing out old delivery logs (Phase 11).
 
 ### Phase 8: Reporting and dashboard metrics (1.5 days)
 Move the client-side aggregations to the server so they are accurate over paginated data.

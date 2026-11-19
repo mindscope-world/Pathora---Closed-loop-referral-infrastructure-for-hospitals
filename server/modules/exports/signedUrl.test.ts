@@ -46,6 +46,10 @@ describe('redactToken', () => {
     expect(redactToken('/x?a=1&token=SECRET&b=2')).toBe('/x?a=1&token=[redacted]&b=2');
     expect(redactToken('/x?token=A&token=B')).toBe('/x?token=[redacted]&token=[redacted]');
   });
+  it('hides webhook secrets too', () => {
+    expect(redactToken('/api/webhooks/messaging/inbound?secret=abc123')).toBe('/api/webhooks/messaging/inbound?secret=[redacted]');
+    expect(redactToken('/x?a=1&secret=abc&token=def')).toBe('/x?a=1&secret=[redacted]&token=[redacted]');
+  });
   it('leaves other URLs alone', () => {
     expect(redactToken('/api/cases?limit=5')).toBe('/api/cases?limit=5');
   });
