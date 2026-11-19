@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { ReferralCase } from '../../data/dashboardData';
+import { formatDate } from '../../data/caseViewModel';
 
 interface DashboardSummaryProps {
   cases: ReferralCase[];
@@ -43,7 +44,8 @@ export function DashboardSummary({
     .filter((c) => {
       if (c.status === 'Closed Verified') return false;
       const dueMs = Date.parse(c.dueDate);
-      const refMs = Date.parse('2026-11-19');
+      // Start of today (East Africa Time): a case due today still counts as due this week.
+      const refMs = Date.parse(formatDate(new Date().toISOString()));
       const diffDays = Number.isNaN(dueMs) ? 0 : (dueMs - refMs) / (1000 * 60 * 60 * 24);
       const withinWeek = diffDays >= 0 && diffDays <= 7;
       return withinWeek || Boolean(c.milestones.facilityAcknowledgedAt && !c.milestones.patientAttendedAt);

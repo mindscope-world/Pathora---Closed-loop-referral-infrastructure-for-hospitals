@@ -7,6 +7,9 @@ interface EscalationsViewProps {
   onEscalateToClinicalLead: (caseId: string, reason: string) => void;
   onLogBarrierResolution: (caseId: string, barrierNote: string) => void;
   onSelectCase: (c: ReferralCase) => void;
+  /** Hide controls the server would reject for this role (the server still enforces). */
+  canEscalate?: boolean;
+  canResolveBarrier?: boolean;
 }
 
 const BARRIER_OPTIONS = [
@@ -21,6 +24,8 @@ export function EscalationsView({
   onEscalateToClinicalLead,
   onLogBarrierResolution,
   onSelectCase,
+  canEscalate = true,
+  canResolveBarrier = true,
 }: EscalationsViewProps) {
   const [selectedBarrier, setSelectedBarrier] = useState<string>(BARRIER_OPTIONS[0]);
 
@@ -120,7 +125,7 @@ export function EscalationsView({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  {c.stage !== 'Escalated' && (
+                  {canEscalate && c.stage !== 'Escalated' && (
                     <button
                       type="button"
                       onClick={() =>
@@ -135,14 +140,16 @@ export function EscalationsView({
                     </button>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={() => onLogBarrierResolution(c.id, selectedBarrier)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-                  >
-                    <PhoneCall className="w-3.5 h-3.5" />
-                    <span>Log Coordinator Resolution</span>
-                  </button>
+                  {canResolveBarrier && (
+                    <button
+                      type="button"
+                      onClick={() => onLogBarrierResolution(c.id, selectedBarrier)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      <PhoneCall className="w-3.5 h-3.5" />
+                      <span>Log Coordinator Resolution</span>
+                    </button>
+                  )}
                 </div>
               </div>
             );

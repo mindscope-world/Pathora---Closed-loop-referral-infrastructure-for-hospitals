@@ -1,10 +1,11 @@
 import { useState, FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { PathoraMark } from '../PathoraMark';
-import { AuthUserSession } from './LoginPage';
+import { useAuth } from '../../auth/AuthProvider';
+import { describeAuthError } from './authForm';
 
 interface SignupPageProps {
-  onSuccess: (user: AuthUserSession) => void;
+  onSuccess: () => void;
   onGoToLogin: () => void;
   onBackToSite: () => void;
 }
@@ -14,22 +15,39 @@ export function SignupPage({
   onGoToLogin,
   onBackToSite,
 }: SignupPageProps) {
+  const { signUp } = useAuth();
   const [fullName, setFullName] = useState('');
   const [organization, setOrganization] = useState('');
-  const [role, setRole] = useState('Programme Manager');
   const [pathway, setPathway] = useState('Cancer Screening');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    onSuccess({
-      name: fullName.trim() || 'Demo Programme Lead',
-      role,
-      organization: organization.trim() || 'Partner Screening Programme',
-      email: email.trim() || 'team@partner-programme.org',
-    });
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    setFieldErrors({});
+    try {
+      await signUp({ fullName, organization, email, password, pathway });
+      onSuccess();
+    } catch (err) {
+      const { message, fields } = describeAuthError(err);
+      setError(message);
+      setFieldErrors(fields);
+      setSubmitting(false);
+    }
   };
+
+  const fieldError = (name: string) =>
+    fieldErrors[name] ? (
+      <p className="mt-1 text-xs text-red-700" role="alert">
+        {fieldErrors[name]}
+      </p>
+    ) : null;
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#061B3A] flex flex-col justify-between p-4 sm:p-6 lg:p-8">
@@ -69,7 +87,7 @@ export function SignupPage({
               Create your Pathora account
             </h1>
             <p className="text-sm text-slate-600 leading-relaxed">
-              Sign up with any details below to explore the Pathora referral accountability workspace right away.
+              Register your organisation to set up your referral accountability workspace. You will be its Programme Manager and can invite your team afterwards.
             </p>
           </div>
 
@@ -88,8 +106,11 @@ export function SignupPage({
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Dr. Amina Ochieng"
+                  autoComplete="name"
+                  required
                   className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
                 />
+                {fieldError('fullName')}
               </div>
               <div>
                 <label
@@ -104,32 +125,15 @@ export function SignupPage({
                   value={organization}
                   onChange={(e) => setOrganization(e.target.value)}
                   placeholder="County Health / Screening NGO"
+                  autoComplete="organization"
+                  required
                   className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
                 />
+                {fieldError('organization')}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
-                <label
-                  htmlFor="signup-role"
-                  className="block text-xs font-semibold text-[#061B3A] mb-1.5"
-                >
-                  Your Role
-                </label>
-                <select
-                  id="signup-role"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-                >
-                  <option value="Programme Manager">Programme Manager</option>
-                  <option value="Programme Coordinator">Programme Coordinator</option>
-                  <option value="Partner Clinical Lead">Partner Clinical Lead</option>
-                  <option value="Receiving Facility Focal">Receiving Facility Focal</option>
-                </select>
-              </div>
-
+            <div className="grid grid-cols-1 gap-3.5">
               <div>
                 <label
                   htmlFor="signup-pathway"
@@ -163,8 +167,11 @@ export function SignupPage({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@organization.org"
+                autoComplete="username"
+                required
                 className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
               />
+              {fieldError('email')}
             </div>
 
             <div>
@@ -179,16 +186,27 @@ export function SignupPage({
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter any password"
+                placeholder="At least 12 characters"
+                autoComplete="new-password"
+                minLength={12}
+                required
                 className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
               />
+              {fieldError('password')}
             </div>
+
+            {error && (
+              <div role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                {error}
+              </div>
+            )}
 
             <button
               type="submit"
-              className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-full transition-colors duration-150 shadow-sm cursor-pointer mt-2"
+              disabled={submitting}
+              className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 disabled:cursor-not-allowed rounded-full transition-colors duration-150 shadow-sm cursor-pointer mt-2"
             >
-              <span>Create Account &amp; Enter Dashboard</span>
+              <span>{submitting ? 'Creating account…' : 'Create Account &amp; Enter Dashboard'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>

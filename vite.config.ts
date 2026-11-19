@@ -34,6 +34,13 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // Forward API calls to the Express server so the browser stays same-origin (no CORS in dev).
+      proxy: {
+        '/api': {
+          target: `http://localhost:${process.env.PORT ?? 4000}`,
+          changeOrigin: true,
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

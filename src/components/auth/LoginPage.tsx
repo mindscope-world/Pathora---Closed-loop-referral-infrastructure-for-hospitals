@@ -1,16 +1,13 @@
 import { useState, FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { PathoraMark } from '../PathoraMark';
+import { useAuth } from '../../auth/AuthProvider';
+import { describeAuthError } from './authForm';
 
-export interface AuthUserSession {
-  name: string;
-  role: string;
-  organization: string;
-  email: string;
-}
+export type { AuthUserSession } from '../../auth/AuthProvider';
 
 interface LoginPageProps {
-  onSuccess: (user: AuthUserSession) => void;
+  onSuccess: () => void;
   onGoToSignup: () => void;
   onBackToSite: () => void;
 }
@@ -20,26 +17,24 @@ export function LoginPage({
   onGoToSignup,
   onBackToSite,
 }: LoginPageProps) {
-  const [email, setEmail] = useState('coordinator@nairobi-screening.org');
-  const [password, setPassword] = useState('••••••••••••');
-  const [workspaceRole, setWorkspaceRole] = useState('Programme Coordinator');
+  const { signIn } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const displayEmail = email.trim() || 'coordinator@pathora.org';
-    const localName = displayEmail.split('@')[0].replace(/[._-]/g, ' ');
-    const formattedName = localName
-      .split(' ')
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
-
-    onSuccess({
-      name: formattedName || 'Miriam Wanjiku',
-      role: workspaceRole,
-      organization: 'Nairobi Preventive Screening Network',
-      email: displayEmail,
-    });
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await signIn({ email, password });
+      onSuccess();
+    } catch (err) {
+      setError(describeAuthError(err).message);
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -80,7 +75,7 @@ export function LoginPage({
               Sign in to Pathora
             </h1>
             <p className="text-sm text-slate-600 leading-relaxed">
-              Access your closed-loop referral queue, facility acknowledgments, and programme reporting. Enter any details below to proceed into the workspace.
+              Access your closed-loop referral queue, facility acknowledgments, and programme reporting.
             </p>
           </div>
 
@@ -98,6 +93,8 @@ export function LoginPage({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@organization.org"
+                autoComplete="username"
+                required
                 className="w-full px-4 py-3 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6] focus:border-transparent"
               />
             </div>
@@ -110,43 +107,31 @@ export function LoginPage({
                 >
                   Password
                 </label>
-                <span className="text-xs text-slate-400">Preview access enabled</span>
               </div>
               <input
                 id="login-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter any password"
+                placeholder="Your password"
+                autoComplete="current-password"
+                required
                 className="w-full px-4 py-3 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6] focus:border-transparent"
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="login-role"
-                className="block text-xs font-semibold text-[#061B3A] mb-1.5"
-              >
-                Workspace Role View
-              </label>
-              <select
-                id="login-role"
-                value={workspaceRole}
-                onChange={(e) => setWorkspaceRole(e.target.value)}
-                className="w-full px-4 py-3 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-              >
-                <option value="Programme Coordinator">Programme Coordinator</option>
-                <option value="Programme Manager">Programme Manager</option>
-                <option value="Receiving Facility Focal">Receiving Facility Focal</option>
-                <option value="Partner Clinical Lead">Partner Clinical Lead</option>
-              </select>
-            </div>
+            {error && (
+              <div role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                {error}
+              </div>
+            )}
 
             <button
               type="submit"
-              className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-full transition-colors duration-150 shadow-sm cursor-pointer mt-2"
+              disabled={submitting}
+              className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 disabled:cursor-not-allowed rounded-full transition-colors duration-150 shadow-sm cursor-pointer mt-2"
             >
-              <span>Sign In to Dashboard</span>
+              <span>{submitting ? 'Signing in…' : 'Sign In to Dashboard'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>

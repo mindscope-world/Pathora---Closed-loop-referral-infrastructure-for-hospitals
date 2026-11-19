@@ -7,6 +7,9 @@ interface FacilitiesViewProps {
   onAcknowledgeCase: (caseId: string) => void;
   onConfirmAttendance: (caseId: string) => void;
   onSelectCase: (c: ReferralCase) => void;
+  /** Hide controls the server would reject for this role (the server still enforces). */
+  canAcknowledge?: boolean;
+  canConfirmAttendance?: boolean;
 }
 
 export function FacilitiesView({
@@ -15,6 +18,8 @@ export function FacilitiesView({
   onAcknowledgeCase,
   onConfirmAttendance,
   onSelectCase,
+  canAcknowledge = true,
+  canConfirmAttendance = true,
 }: FacilitiesViewProps) {
   const incomingQueue = cases.filter((c) => c.status !== 'Closed Verified');
 
@@ -146,7 +151,7 @@ export function FacilitiesView({
                       )}
                     </td>
                     <td className="py-3 px-5 text-right whitespace-nowrap space-x-2">
-                      {!isAcked && (
+                      {!isAcked && canAcknowledge && (
                         <button
                           type="button"
                           onClick={() => onAcknowledgeCase(item.id)}
@@ -155,7 +160,7 @@ export function FacilitiesView({
                           Acknowledge Receipt
                         </button>
                       )}
-                      {isAcked && !isAttended && (
+                      {isAcked && !isAttended && canConfirmAttendance && (
                         <button
                           type="button"
                           onClick={() => onConfirmAttendance(item.id)}

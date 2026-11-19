@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# local build output
+server.js
+server/db/generated/
