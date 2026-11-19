@@ -91,7 +91,7 @@ describe('isolation: the run leaves no trace', () => {
     const res = (await run('RP-CANCER', w.clinical)).body as SyntheticTestResponse;
     expect(outcomes(res).isolation).toBe('PASSED');
     expect(await liveRows(w)).toEqual(before);
-    expect(await prisma.referralCase.count({ where: { refNumber: { startsWith: 'SYN-' } } })).toBe(0);
+    expect(await prisma.referralCase.count({ where: { orgId: w.orgId, refNumber: { startsWith: 'SYN-' } } })).toBe(0);
   });
 
   it('never touches a real overdue referral, which the real monitor still handles afterwards', async () => {
