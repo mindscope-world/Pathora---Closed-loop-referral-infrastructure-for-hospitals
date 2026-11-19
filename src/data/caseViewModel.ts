@@ -101,5 +101,7 @@ export function toViewFacility(f: FacilityDto): FacilityPartner {
     focalPerson: f.focalPerson ?? '—',
     interopMethod: INTEROP[f.interopMethod],
     avgAckHours: f.avgAckHours === null ? 0 : Math.round(f.avgAckHours),
+    typeId: f.type,
+    interopId: f.interopMethod,
   };
 }

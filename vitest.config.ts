@@ -17,6 +17,10 @@ Object.assign(process.env, testEnv);
 export default defineConfig({
   test: {
     environment: 'node',
+    // Integration tests hit a real database; the 5s default is too tight on a loaded or shared machine.
+    // A genuine hang still fails, just later.
+    testTimeout: 20_000,
+    hookTimeout: 30_000,
     globalSetup: ['server/test/globalSetup.ts'],
     // DB tests share one database; run files serially.
     fileParallelism: false,

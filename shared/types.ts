@@ -313,3 +313,106 @@ export interface ExportJobDto {
   /** Short-lived signed link; present only while the job is READY. Each fetch of the job mints a fresh one. */
   downloadUrl: string | null;
 }
+
+// ───────────────────────────── Team, organisation, facilities ─────────────────────────────
+
+/** Plain-language access description shown beside each role (and stored on the user when they join). */
+export const ROLE_SCOPES: Record<UserRole, string> = {
+  PROGRAMME_MANAGER: 'Owns programme configuration, referrals, team access and exports',
+  PROGRAMME_COORDINATOR: 'Coordinates active referral follow-up & SLA queues',
+  FACILITY_FOCAL: 'Acknowledges referrals & returns authorized outcome data',
+  CLINICAL_LEAD: 'Approves pathway rules, red flags & closure criteria',
+  DPO: 'Audits consent logs, access history & retention policies',
+};
+
+export interface TeamMemberDto {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  /** Free-text site/organisation label. */
+  affiliation: string | null;
+  facility: { id: string; name: string } | null;
+  accessScope: string;
+  active: boolean;
+  lastLoginAt: string | null;
+  /** Referrals this person currently owns that are not yet closed (reassign these before deactivating). */
+  openCases: number;
+}
+
+export interface InviteDto {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  facility: { id: string; name: string } | null;
+  invitedBy: string;
+  createdAt: string;
+  expiresAt: string;
+  status: 'PENDING' | 'EXPIRED';
+}
+
+export interface TeamResponse {
+  members: TeamMemberDto[];
+  invites: InviteDto[];
+}
+
+export interface InviteRequest {
+  email: string;
+  name: string;
+  role: UserRole;
+  /** Required when role is FACILITY_FOCAL. */
+  facilityId?: string;
+}
+
+export interface InviteCreatedResponse {
+  invite: InviteDto;
+  /** Single-use link the invitee follows to choose a password. Shown once: only a hash is stored. */
+  inviteUrl: string;
+  /** Whether an email was sent. When false, the inviter shares the link themselves. */
+  emailed: boolean;
+}
+
+export interface UpdateMemberRequest {
+  active?: boolean;
+  role?: UserRole;
+  facilityId?: string | null;
+  name?: string;
+}
+
+export interface InviteLookupResponse {
+  email: string;
+  name: string;
+  role: UserRole;
+  organization: string;
+  invitedBy: string;
+  expiresAt: string;
+}
+
+export interface AcceptInviteRequest {
+  token: string;
+  password: string;
+  /** Lets the invitee correct the name the inviter typed. */
+  name?: string;
+}
+
+export interface OrganizationDto {
+  id: string;
+  name: string;
+  dpoContact: string | null;
+  retentionDays: number;
+  createdAt: string;
+}
+
+export interface UpdateOrganizationRequest {
+  name?: string;
+  dpoContact?: string | null;
+  retentionDays?: number;
+}
+
+export interface FacilityInput {
+  name: string;
+  type: FacilityDto['type'];
+  city: string;
+  interopMethod: FacilityDto['interopMethod'];
+}

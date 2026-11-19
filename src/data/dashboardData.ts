@@ -57,6 +57,9 @@ export interface FacilityPartner {
   focalPerson: string;
   interopMethod: 'Portal + CSV' | 'API Ready' | 'Status-Return Desk';
   avgAckHours: number;
+  /** API enum values, present on facilities loaded from the server (used by the edit form). */
+  typeId?: 'PUBLIC_REFERRAL' | 'FAITH_BASED' | 'PRIVATE_SPECIALIST' | 'COUNTY_DIAGNOSTIC';
+  interopId?: 'PORTAL_CSV' | 'API_READY' | 'STATUS_RETURN_DESK';
 }
 
 export interface MessageTemplate {
@@ -100,20 +103,6 @@ export interface AuditEvent {
   action: string;
   resourceId: string;
   detail: string;
-}
-
-export interface TeamMember {
-  id: string;
-  name: string;
-  role:
-    | 'Programme Manager'
-    | 'Programme Coordinator'
-    | 'Receiving Facility Focal'
-    | 'Partner Clinical Lead'
-    | 'Data Protection Contact';
-  organization: string;
-  accessScope: string;
-  active: boolean;
 }
 
 export const INITIAL_FACILITIES: FacilityPartner[] = [
@@ -500,48 +489,5 @@ export const INITIAL_AUDIT_EVENTS: AuditEvent[] = [
     action: 'OUTCOME_VERIFIED_CLOSURE',
     resourceId: 'REF-2026-0421',
     detail: 'Documented clinical outcome and closed case with verified audit trail.',
-  },
-];
-
-export const INITIAL_TEAM: TeamMember[] = [
-  {
-    id: 'USR-01',
-    name: 'Dr. Grace Njeri',
-    role: 'Partner Clinical Lead',
-    organization: 'Nairobi Screening Programme',
-    accessScope: 'Approves pathway rules, red flags & closure criteria',
-    active: true,
-  },
-  {
-    id: 'USR-02',
-    name: 'Miriam Wanjiku',
-    role: 'Programme Coordinator',
-    organization: 'Nairobi Screening Programme',
-    accessScope: 'Manages active referrals, patient follow-up & escalations',
-    active: true,
-  },
-  {
-    id: 'USR-03',
-    name: 'Peter Omondi',
-    role: 'Programme Coordinator',
-    organization: 'Kisumu Community Health Network',
-    accessScope: 'Manages NCD cohort intake, handoffs & barrier resolution',
-    active: true,
-  },
-  {
-    id: 'USR-04',
-    name: 'Sr. Beatrice Muthoni',
-    role: 'Receiving Facility Focal',
-    organization: 'Kenyatta Referral Outpatient Desk',
-    accessScope: 'Acknowledges incoming referrals & returns outcome status',
-    active: true,
-  },
-  {
-    id: 'USR-05',
-    name: 'David Kamau',
-    role: 'Data Protection Contact',
-    organization: 'Partner Legal & Compliance',
-    accessScope: 'Audits consent logs, access history & retention policies',
-    active: true,
   },
 ];

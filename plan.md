@@ -361,6 +361,16 @@ Each phase ends in something demoable and testable. Phases 0–4 give a usable c
 
 **Exit:** a manager can invite a facility focal, who then logs in and sees only their facility's referrals.
 
+> **Phase 5 as built** (differences from the steps above, and why)
+> - **Invitations, not "add user":** a manager invites by email + role; the invitee follows a single-use link (7 days, only a hash is stored, token travels in a request *body* so it never reaches access logs) and chooses their own password. Re-inviting replaces the earlier link. Accepting is atomic, so simultaneous attempts create exactly one account.
+> - **Email is optional:** with `SMTP_URL` set an email (plain text only) is sent; without it, the inviter is shown the link once and shares it themselves. The SMTP path is tested against nodemailer's JSON transport, not a real mail server.
+> - **Safeguards:** you cannot suspend or re-role yourself; the last active Programme Manager cannot be removed (enforced with a row lock, tested with simultaneous mutual demotion); deactivation ends every session immediately; role changes apply on the next request.
+> - **Account-existence privacy:** an invitation to an address that already has an account (in any organisation) fails with one generic message. It still distinguishes "cannot invite" from success, which is inherent to a one-email-one-account model.
+> - **Organisation settings** are validated server-side (retention 30-3650 days) and every change is audited with before → after. **Facilities** can be added and edited (names unique per organisation; renames keep existing referrals attached). Facilities are not deletable.
+> - **Free-text names reject control characters** (header/CSV injection), across signup, team, facility and organisation inputs.
+> - **Seed:** the demo organisation now includes a Programme Manager (`joyce.wairimu@demo.pathora.test`); before, nobody in it could manage anything.
+> - **Tests:** argon2 uses a minimal cost under `NODE_ENV=test` only (production keeps the defaults), which removed hashing as the dominant and flaky part of the suite.
+
 ### Phase 6: Rule packs and the SLA monitor (2 days)
 1. `GET /rule-packs`, `PATCH /rule-packs/:id` (Clinical Lead only). Editing creates a **new version row** (`effectiveFrom = now`). Existing cases keep their pinned pack. Writes a `RULE_PACK_UPDATED` audit event.
 2. Server-side bounds validation (the UI uses `Math.max(4, …)` and `Math.max(1, …)`, which is not authoritative).
