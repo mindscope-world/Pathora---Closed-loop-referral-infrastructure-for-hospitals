@@ -13,7 +13,7 @@ export const STRONG_PASSWORD = 'correct horse battery staple';
  * generated call `processPending()` themselves, which keeps them deterministic.
  */
 export const makeApp = () =>
-  createApp({ auth: { loginMaxPerIp: 10_000, signupMaxPerIp: 10_000 }, invites: { maxPerIp: 10_000 }, leads: { maxPerIp: 10_000 }, messages: { kick: () => undefined }, exports: { kick: () => undefined } });
+  createApp({ auth: { loginMaxPerIp: 10_000, signupMaxPerIp: 10_000 }, invites: { maxPerIp: 10_000 }, leads: { maxPerIp: 10_000 }, integrations: { maxFailedPerIp: 10_000, maxPerKey: 10_000 }, messages: { kick: () => undefined }, exports: { kick: () => undefined } });
 
 export function signupBody(over: Record<string, unknown> = {}) {
   return {

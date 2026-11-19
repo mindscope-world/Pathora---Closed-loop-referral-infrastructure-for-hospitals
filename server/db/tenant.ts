@@ -13,7 +13,7 @@ import { HttpError } from '../lib/errors';
  */
 const TENANT_MODELS = new Set([
   'User', 'Facility', 'Patient', 'RulePack', 'ReferralCase',
-  'MessageTemplate', 'CommsLog', 'AuditEvent', 'ExportJob', 'Invite', 'Notification', 'ReportSchedule',
+  'MessageTemplate', 'CommsLog', 'AuditEvent', 'ExportJob', 'Invite', 'Notification', 'ReportSchedule', 'FacilityApiKey',
 ]);
 
 /** Filters that accept arbitrary conditions: orgId is ANDed in. */

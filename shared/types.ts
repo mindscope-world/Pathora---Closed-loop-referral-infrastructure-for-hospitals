@@ -672,3 +672,33 @@ export interface CreateReportScheduleRequest {
 export interface UpdateReportScheduleRequest {
   enabled: boolean;
 }
+
+// ───────────────────────────── Facility integrations ─────────────────────────────
+
+export type ApiKeyScopeId = 'referrals:read' | 'referrals:identify' | 'status:write';
+
+export interface FacilityApiKeyDto {
+  id: string;
+  name: string;
+  /** Public identifier (`pk_<id>`), safe to show; the secret is never retrievable after creation. */
+  keyPrefix: string;
+  scopes: ApiKeyScopeId[];
+  createdBy: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface CreateApiKeyRequest {
+  name: string;
+  scopes: ApiKeyScopeId[];
+  /** Optional lifetime; omit for a key that stays valid until revoked. */
+  expiresInDays?: number;
+}
+
+/** Returned once, at creation. Store both values now: they cannot be shown again. */
+export interface CreatedApiKeyResponse extends FacilityApiKeyDto {
+  apiKey: string;
+  signingSecret: string;
+}

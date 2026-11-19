@@ -9,6 +9,8 @@ export interface AuthContext {
   facilityId: string | null;
   name: string;
   email: string;
+  /** Set when the caller is a facility's system using an API key rather than a signed-in person. */
+  via?: 'integration';
 }
 
 declare module 'express-serve-static-core' {

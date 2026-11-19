@@ -482,6 +482,30 @@ The landing copy promises "secure CSV now, partner EMR APIs and FHIR later".
 2. A FHIR R4 `ServiceRequest` (outbound referral) and `Task` (status return) mapping layer. Keep it behind an adapter so the core domain stays FHIR-agnostic.
 3. SFTP or portal drop for the `Portal + CSV` facilities.
 
+#### Phase 10 as built
+
+- **Facility API keys.** `FacilityApiKey` (per facility, scoped `referrals:read` / `referrals:identify` / `status:write`,
+  optional expiry, revocable, max 5 active per facility). Managed by the programme manager at
+  `/api/facilities/:id/api-keys` (permission `integrations.manage`). The secret and a separate HMAC **signing secret** are
+  shown once; only a SHA-256 of the secret and an encrypted signing secret are stored, and the audit trail records the key's
+  name and scopes, never a secret. One identical `401` for unknown / wrong / revoked / expired keys.
+- **Signed callbacks.** `POST` calls need `X-Pathora-Signature: t=…,v1=HMAC-SHA256(secret, "<t>." + raw body)` with a 5-minute
+  window (the timestamp is part of what is signed). The integration routes keep the body raw so the exact bytes are verified.
+- **Status return** (`/api/integrations/v1`): `referrals/:ref/acknowledge|attendance|outcome`, FHIR `Task`, and a CSV
+  upload. They call the **same case actions as the dashboard** (state machine, optimistic lock, audit, SLA reset) as the
+  facility's own identity: scoped to that facility (another facility's or organisation's referral is a 404), recorded as
+  "Facility system (API)", with no person attributed. Idempotent (a repeat returns `already_recorded`), safe under races, and
+  out-of-order steps are refused rather than back-filled.
+- **FHIR R4 adapter** (`server/integrations/fhir`): `ServiceRequest` (outbound referral), `Task` (status), searchset
+  `Bundle`, `CapabilityStatement`, `OperationOutcome` errors. The core domain knows nothing about FHIR. Patients are
+  identified by programme code only unless the key has `referrals:identify`; each release of names is audited.
+- **File route:** `GET /referrals.csv` and `POST /status-returns.csv` (up to 500 rows, per-row results) for Portal + CSV
+  facilities. Integrator guide: `docs/facility-integration.md`.
+- **Limits:** 300 requests/minute per key; failed authentication is throttled per IP (successes never count toward it).
+- **Deliberately not built:** a hosted **SFTP** drop (needs infrastructure: a managed SFTP gateway writing to a bucket plus a
+  worker that feeds the CSV endpoint's logic), **outbound push** of referrals to facility endpoints (facilities pull today;
+  a push needs retries, dead-lettering and per-facility endpoint config), and a **UI** for key management (API only).
+
 ### Phase 11: Hardening, observability, deployment (2 days)
 1. **Security:** OWASP review, secrets in a manager, CSP headers, dependency audit, backup and restore drill, and a pen-test checklist.
 2. **Data protection:** retention purge job driven by `retentionDays`, a data subject access and erasure procedure (erasure must preserve the audit chain by redacting payloads, not rows), and a DPIA document.

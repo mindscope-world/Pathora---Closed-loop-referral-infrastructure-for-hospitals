@@ -47,6 +47,8 @@ export const PERMISSIONS = {
   'facilities.read': ALL,
   'facilities.manage': [MANAGER],
   'metrics.read': ALL,
+  // Facility system credentials (API keys) for status-return and referral pull.
+  'integrations.manage': [MANAGER],
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
