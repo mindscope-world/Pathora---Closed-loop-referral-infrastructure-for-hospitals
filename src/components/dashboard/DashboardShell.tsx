@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -19,20 +19,8 @@ import {
 } from 'lucide-react';
 import { PathoraMark } from '../PathoraMark';
 import { AuthUserSession } from '../auth/LoginPage';
-import {
-  AuditEvent,
-  CommsLogEntry,
-  INITIAL_AUDIT_EVENTS,
-  INITIAL_CASES,
-  INITIAL_COMMS_LOG,
-  INITIAL_FACILITIES,
-  INITIAL_RULE_PACKS,
-  INITIAL_TEAM,
-  PathwayName,
-  PathwayRulePack,
-  ReferralCase,
-  TeamMember,
-} from '../../data/dashboardData';
+import { INITIAL_FACILITIES, PathwayName } from '../../data/dashboardData';
+import { api, Workspace } from '../../lib/api';
 import { OverviewView } from './OverviewView';
 import { CasesView } from './CasesView';
 import { FacilitiesView } from './FacilitiesView';
@@ -57,25 +45,44 @@ interface DashboardShellProps {
   onExitDashboard: () => void;
 }
 
-function nowTimestamp(): string {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(
-    now.getHours()
-  )}:${pad(now.getMinutes())}`;
-}
-
 export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  // Core Stateful Workspace Data
-  const [cases, setCases] = useState<ReferralCase[]>(INITIAL_CASES);
-  const [facilities] = useState(INITIAL_FACILITIES);
-  const [commsLog, setCommsLog] = useState<CommsLogEntry[]>(INITIAL_COMMS_LOG);
-  const [rulePacks, setRulePacks] = useState<PathwayRulePack[]>(INITIAL_RULE_PACKS);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(INITIAL_AUDIT_EVENTS);
-  const [team, setTeam] = useState<TeamMember[]>(INITIAL_TEAM);
+  // Core Workspace Data (loaded from and persisted by the Pathora API)
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const cases = workspace?.cases ?? [];
+  const facilities = workspace?.facilities ?? [];
+  const commsLog = workspace?.commsLog ?? [];
+  const rulePacks = workspace?.rulePacks ?? [];
+  const auditEvents = workspace?.auditEvents ?? [];
+  const team = workspace?.team ?? [];
+
+  const loadWorkspace = () => {
+    setLoadError(null);
+    api
+      .getWorkspace()
+      .then(setWorkspace)
+      .catch((err: unknown) =>
+        setLoadError(err instanceof Error ? err.message : 'Could not load the workspace.')
+      );
+  };
+
+  useEffect(loadWorkspace, []);
+
+  /** Run a workspace mutation, replace local state with the server's copy, surface errors. */
+  const runAction = async (action: () => Promise<Workspace>): Promise<boolean> => {
+    try {
+      setWorkspace(await action());
+      setActionError(null);
+      return true;
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'That action could not be completed.');
+      return false;
+    }
+  };
 
   // Global Header Search State
   const [globalQuery, setGlobalQuery] = useState('');
@@ -103,181 +110,45 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   const [newRedFlag, setNewRedFlag] = useState(false);
   const [newConsentSms, setNewConsentSms] = useState(true);
   const [newCaseError, setNewCaseError] = useState<string | null>(null);
+  const [newCaseSubmitting, setNewCaseSubmitting] = useState(false);
 
   // CSV Import State
   const [csvText, setCsvText] = useState(
     'PT-8850,Cohort NBO · F / 47,Cancer Screening,Nairobi Mobile Cervical Screening,Miriam Wanjiku,Kenyatta Referral Outpatient Desk\nPT-8851,Cohort MBA · M / 55,NCD Screening,Coastal Preventive Health Drive,Amina Salim,Pwani Regional Care Hospital'
   );
   const [csvFeedback, setCsvFeedback] = useState<string | null>(null);
+  const [csvFeedbackIsError, setCsvFeedbackIsError] = useState(false);
 
   const selectedCase = cases.find((c) => c.id === selectedCaseId) ?? null;
 
-  const appendAudit = (
-    actor: string,
-    role: string,
-    action: string,
-    resourceId: string,
-    detail: string
-  ) => {
-    setAuditEvents((prev) => [
-      {
-        id: `AUD-${500 + prev.length + 1}`,
-        timestamp: nowTimestamp(),
-        actor,
-        role,
-        action,
-        resourceId,
-        detail,
-      },
-      ...prev,
-    ]);
-  };
-
   // Case Actions
   const handleAcknowledgeCase = (caseId: string) => {
-    const ts = nowTimestamp();
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId
-          ? {
-              ...c,
-              stage: 'Acknowledged',
-              status: c.status === 'Overdue SLA' ? 'Active' : 'Active',
-              milestones: { ...c.milestones, facilityAcknowledgedAt: ts },
-            }
-          : c
-      )
-    );
-    appendAudit(
-      'Receiving Facility Focal',
-      'Receiving Facility Focal',
-      'FACILITY_ACKNOWLEDGED',
-      caseId,
-      'Confirmed referral receipt via Receiving Facility Desk.'
-    );
+    void runAction(() => api.acknowledgeCase(caseId));
   };
 
   const handleConfirmAttendance = (caseId: string) => {
-    const ts = nowTimestamp();
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId
-          ? {
-              ...c,
-              stage: 'Attended',
-              status: 'Active',
-              milestones: {
-                ...c.milestones,
-                facilityAcknowledgedAt: c.milestones.facilityAcknowledgedAt ?? ts,
-                patientAttendedAt: ts,
-              },
-            }
-          : c
-      )
-    );
-    appendAudit(
-      'Receiving Facility Focal',
-      'Receiving Facility Focal',
-      'ATTENDANCE_CONFIRMED',
-      caseId,
-      'Confirmed patient clinical attendance at receiving facility.'
-    );
+    void runAction(() => api.confirmAttendance(caseId));
   };
 
-  const handleDocumentClosure = (e: FormEvent) => {
+  const handleDocumentClosure = async (e: FormEvent) => {
     e.preventDefault();
     if (!selectedCase) return;
-    const source = outcomeSourceInput.trim() || `${selectedCase.receivingFacility} Focal`;
-    const ts = nowTimestamp();
-
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === selectedCase.id
-          ? {
-              ...c,
-              stage: 'Closed',
-              status: 'Closed Verified',
-              slaHoursRemaining: 0,
-              closureReason: closureReasonInput,
-              outcomeSource: source,
-              milestones: {
-                ...c.milestones,
-                facilityAcknowledgedAt: c.milestones.facilityAcknowledgedAt ?? ts,
-                patientAttendedAt: c.milestones.patientAttendedAt ?? ts,
-                evaluationCompletedAt: c.milestones.evaluationCompletedAt ?? ts,
-                outcomeDocumentedAt: ts,
-              },
-            }
-          : c
-      )
+    const ok = await runAction(() =>
+      api.closeCase(selectedCase.id, closureReasonInput, outcomeSourceInput.trim())
     );
-
-    appendAudit(
-      source,
-      'Receiving Facility Focal',
-      'OUTCOME_VERIFIED_CLOSURE',
-      selectedCase.id,
-      `Closed case with verified outcome: ${closureReasonInput}`
-    );
-    setOutcomeSourceInput('');
+    if (ok) setOutcomeSourceInput('');
   };
 
   const handleEscalateToClinicalLead = (caseId: string, reason: string) => {
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId
-          ? {
-              ...c,
-              stage: 'Escalated',
-              status: 'Overdue SLA',
-              notes: `${c.notes} | Escalated: ${reason}`,
-            }
-          : c
-      )
-    );
-    appendAudit(
-      'System SLA Monitor',
-      'Programme Coordinator',
-      'SLA_ESCALATION_TRIGGERED',
-      caseId,
-      reason
-    );
+    void runAction(() => api.escalateCase(caseId, reason));
   };
 
   const handleLogBarrierResolution = (caseId: string, barrierNote: string) => {
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId
-          ? {
-              ...c,
-              status: 'Active',
-              stage: c.stage === 'Escalated' ? 'Contacted' : c.stage,
-              slaHoursRemaining: 24,
-              notes: `Resolution logged: ${barrierNote}`,
-            }
-          : c
-      )
-    );
-    appendAudit(
-      'Miriam Wanjiku',
-      'Programme Coordinator',
-      'BARRIER_RESOLUTION_LOGGED',
-      caseId,
-      barrierNote
-    );
+    void runAction(() => api.logBarrierResolution(caseId, barrierNote));
   };
 
   const handleReassignOwner = (caseId: string, newOwner: string) => {
-    setCases((prev) =>
-      prev.map((c) => (c.id === caseId ? { ...c, coordinator: newOwner } : c))
-    );
-    appendAudit(
-      'Programme Manager',
-      'Programme Manager',
-      'CASE_REASSIGNED',
-      caseId,
-      `Named ownership transferred to ${newOwner}.`
-    );
+    void runAction(() => api.reassignOwner(caseId, newOwner));
   };
 
   const handleSendMessage = (
@@ -285,50 +156,11 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
     channel: 'SMS' | 'WhatsApp',
     templateName: string
   ) => {
-    const target = cases.find((c) => c.id === caseId);
-    if (!target) return;
-    const status = target.optedOut ? 'Blocked (Opt-out)' : 'Delivered';
-
-    setCommsLog((prev) => [
-      {
-        id: `MSG-${900 + prev.length + 1}`,
-        caseId,
-        patientCode: target.patientCode,
-        channel,
-        templateName,
-        deliveryStatus: status,
-        timestamp: nowTimestamp(),
-      },
-      ...prev,
-    ]);
-
-    appendAudit(
-      target.coordinator,
-      'Programme Coordinator',
-      target.optedOut ? 'MESSAGE_BLOCKED_OPTOUT' : 'DISCREET_MESSAGE_SENT',
-      caseId,
-      target.optedOut
-        ? `Blocked ${channel} template (${templateName}) due to recorded patient opt-out.`
-        : `Sent discreet ${channel} template "${templateName}".`
-    );
+    void runAction(() => api.sendMessage(caseId, channel, templateName));
   };
 
   const handleToggleOptOut = (caseId: string) => {
-    const target = cases.find((c) => c.id === caseId);
-    if (!target) return;
-    const nextOptOut = !target.optedOut;
-    setCases((prev) =>
-      prev.map((c) => (c.id === caseId ? { ...c, optedOut: nextOptOut } : c))
-    );
-    appendAudit(
-      'Data Protection Contact',
-      'Data Protection Contact',
-      nextOptOut ? 'CONSENT_OPTOUT_RECORDED' : 'CONSENT_RESTORED',
-      caseId,
-      nextOptOut
-        ? 'Patient opted out of automated SMS/WhatsApp; routed to human coordinator.'
-        : 'Patient follow-up consent restored.'
-    );
+    void runAction(() => api.toggleOptOut(caseId));
   };
 
   const handleUpdateRulePackSla = (
@@ -336,144 +168,66 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
     ackSlaHours: number,
     evalTargetDays: number
   ) => {
-    setRulePacks((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, ackSlaHours, evalTargetDays } : p
-      )
-    );
-    appendAudit(
-      'Dr. Grace Njeri',
-      'Partner Clinical Lead',
-      'RULE_PACK_UPDATED',
-      id,
-      `Updated facility acknowledgment SLA to ${ackSlaHours}h and evaluation target to ${evalTargetDays} days.`
-    );
+    void runAction(() => api.updateRulePack(id, ackSlaHours, evalTargetDays));
   };
 
-  const handleCreateNewCase = (e: FormEvent) => {
+  const handleCreateNewCase = async (e: FormEvent) => {
     e.preventDefault();
     if (!newPatientCode.trim() && !newPatientName.trim()) {
       setNewCaseError('Please enter a patient name or identifier code.');
       return;
     }
 
-    const newId = `REF-2026-0${418 + cases.length + 1}`;
-    const ts = nowTimestamp();
-    const code = newPatientCode.trim().toUpperCase() || `PT-${8850 + cases.length}`;
-    const name = newPatientName.trim() || `Patient ${code}`;
-    const created: ReferralCase = {
-      id: newId,
-      patientCode: code,
-      patientName: name,
-      patientLabel: newPatientLabel.trim() || 'Cohort NBO · Screened',
-      pathway: newPathway,
-      sourceProgram: newSourceProgram,
-      coordinator: newCoordinator,
-      receivingFacility: newFacility,
-      stage: 'Handoff Sent',
-      status: 'Awaiting Ack',
-      consentSms: newConsentSms,
-      consentWhatsApp: false,
-      optedOut: false,
-      createdAt: ts,
-      dueDate: '2026-11-23',
-      slaHoursRemaining: 36,
-      redFlag: newRedFlag,
-      notes: newRedFlag
-        ? 'Red-flag positive screen logged with expedited clinical escalation.'
-        : 'Positive screen logged; awaiting receiving facility acknowledgment.',
-      milestones: {
-        referralIssuedAt: ts,
-      },
-    };
-
-    setCases((prev) => [created, ...prev]);
-    appendAudit(
-      newCoordinator,
-      'Programme Coordinator',
-      'CASE_CREATED',
-      newId,
-      `Logged ${newPathway} positive screen (${created.patientName} · ${created.patientCode}) routed to ${newFacility}.`
-    );
-
-    setNewPatientName('');
-    setNewPatientCode('');
-    setNewPatientLabel('');
-    setNewRedFlag(false);
-    setNewCaseError(null);
-    setNewCaseModalOpen(false);
-    setActiveTab('cases');
+    setNewCaseSubmitting(true);
+    try {
+      const next = await api.createCase({
+        patientName: newPatientName.trim(),
+        patientCode: newPatientCode.trim(),
+        patientLabel: newPatientLabel.trim(),
+        pathway: newPathway,
+        sourceProgram: newSourceProgram,
+        coordinator: newCoordinator,
+        receivingFacility: newFacility,
+        redFlag: newRedFlag,
+        consentSms: newConsentSms,
+      });
+      setWorkspace(next);
+      setNewPatientName('');
+      setNewPatientCode('');
+      setNewPatientLabel('');
+      setNewRedFlag(false);
+      setNewCaseError(null);
+      setNewCaseModalOpen(false);
+      setActiveTab('cases');
+    } catch (err) {
+      setNewCaseError(err instanceof Error ? err.message : 'Could not create the case.');
+    } finally {
+      setNewCaseSubmitting(false);
+    }
   };
 
-  const handleCsvImport = (e: FormEvent) => {
+  const handleCsvImport = async (e: FormEvent) => {
     e.preventDefault();
-    const lines = csvText
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    if (lines.length === 0) {
+    if (!csvText.trim()) {
+      setCsvFeedbackIsError(true);
       setCsvFeedback('Please enter at least one CSV row to import.');
       return;
     }
 
-    const ts = nowTimestamp();
-    const imported: ReferralCase[] = [];
-
-    lines.forEach((line, index) => {
-      const cols = line.split(',').map((s) => s.trim());
-      if (cols.length >= 2) {
-        const id = `REF-2026-0${418 + cases.length + index + 1}`;
-        const pathwayVal: PathwayName =
-          cols[2] === 'NCD Screening'
-            ? 'NCD Screening'
-            : cols[2] === 'Male Reproductive Health'
-            ? 'Male Reproductive Health'
-            : 'Cancer Screening';
-
-        imported.push({
-          id,
-          patientCode: cols[0] || `PT-IMP-${index + 1}`,
-          patientName: `Imported Patient ${cols[0] || index + 1}`,
-          patientLabel: cols[1] || 'CSV Imported Cohort',
-          pathway: pathwayVal,
-          sourceProgram: cols[3] || 'Secure CSV Intake',
-          coordinator: cols[4] || 'Miriam Wanjiku',
-          receivingFacility: cols[5] || INITIAL_FACILITIES[0].name,
-          stage: 'Handoff Sent',
-          status: 'Awaiting Ack',
-          consentSms: true,
-          consentWhatsApp: false,
-          optedOut: false,
-          createdAt: ts,
-          dueDate: '2026-11-24',
-          slaHoursRemaining: 48,
-          redFlag: false,
-          notes: 'Imported via Phase 1 Secure CSV Intake.',
-          milestones: { referralIssuedAt: ts },
-        });
-      }
-    });
-
-    if (imported.length === 0) {
-      setCsvFeedback('Could not parse valid rows. Expected comma-separated columns.');
-      return;
+    try {
+      const result = await api.importCsv(csvText);
+      setWorkspace(result.workspace);
+      setCsvFeedbackIsError(false);
+      setCsvFeedback(`Successfully imported ${result.importedCount} cases into the active queue.`);
+      setTimeout(() => {
+        setCsvFeedback(null);
+        setCsvModalOpen(false);
+        setActiveTab('cases');
+      }, 900);
+    } catch (err) {
+      setCsvFeedbackIsError(true);
+      setCsvFeedback(err instanceof Error ? err.message : 'Could not import the CSV batch.');
     }
-
-    setCases((prev) => [...imported, ...prev]);
-    appendAudit(
-      'Programme Manager',
-      'Programme Manager',
-      'CSV_BATCH_IMPORTED',
-      `BATCH-${imported.length}`,
-      `Imported ${imported.length} consented referrals via secure CSV intake.`
-    );
-    setCsvFeedback(`Successfully imported ${imported.length} cases into the active queue.`);
-    setTimeout(() => {
-      setCsvFeedback(null);
-      setCsvModalOpen(false);
-      setActiveTab('cases');
-    }, 900);
   };
 
   const overdueCount = cases.filter((c) => c.status === 'Overdue SLA').length;
@@ -755,14 +509,48 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
 
         {/* Active Page Viewport */}
         <main className="flex-1 p-4 sm:p-6 max-w-[1320px] w-full mx-auto">
-          {activeTab === 'overview' && (
+          {actionError && (
+            <div
+              role="alert"
+              className="mb-4 flex items-start justify-between gap-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3"
+            >
+              <span>{actionError}</span>
+              <button
+                type="button"
+                onClick={() => setActionError(null)}
+                aria-label="Dismiss error"
+                className="text-red-500 hover:text-red-800 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+          {!workspace && (
+            <div className="py-24 text-center text-sm text-slate-500 space-y-3">
+              {loadError ? (
+                <>
+                  <p className="text-red-700">{loadError}</p>
+                  <button
+                    type="button"
+                    onClick={loadWorkspace}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-lg cursor-pointer"
+                  >
+                    Try again
+                  </button>
+                </>
+              ) : (
+                <p>Loading workspace…</p>
+              )}
+            </div>
+          )}
+          {workspace && activeTab === 'overview' && (
             <OverviewView
               cases={cases}
               onSelectCase={(c) => setSelectedCaseId(c.id)}
               onNavigate={(tab) => setActiveTab(tab)}
             />
           )}
-          {activeTab === 'cases' && (
+          {workspace && activeTab === 'cases' && (
             <CasesView
               cases={cases}
               onSelectCase={(c) => setSelectedCaseId(c.id)}
@@ -770,7 +558,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               onOpenCsvImport={() => setCsvModalOpen(true)}
             />
           )}
-          {activeTab === 'facilities' && (
+          {workspace && activeTab === 'facilities' && (
             <FacilitiesView
               facilities={facilities}
               cases={cases}
@@ -779,7 +567,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               onSelectCase={(c) => setSelectedCaseId(c.id)}
             />
           )}
-          {activeTab === 'escalations' && (
+          {workspace && activeTab === 'escalations' && (
             <EscalationsView
               cases={cases}
               onEscalateToClinicalLead={handleEscalateToClinicalLead}
@@ -787,7 +575,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               onSelectCase={(c) => setSelectedCaseId(c.id)}
             />
           )}
-          {activeTab === 'comms' && (
+          {workspace && activeTab === 'comms' && (
             <CommsConsentView
               cases={cases}
               commsLog={commsLog}
@@ -795,49 +583,29 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               onToggleOptOut={handleToggleOptOut}
             />
           )}
-          {activeTab === 'pathways' && (
+          {workspace && activeTab === 'pathways' && (
             <PathwaysView
               rulePacks={rulePacks}
               onUpdateRulePackSla={handleUpdateRulePackSla}
             />
           )}
-          {activeTab === 'audit' && (
+          {workspace && activeTab === 'audit' && (
             <AuditView
               auditEvents={auditEvents}
               cases={cases}
-              onExportLogged={(exportType) =>
-                appendAudit(
-                  'Miriam Wanjiku',
-                  'Programme Coordinator',
-                  'DATA_EXPORTED',
-                  'REPORT',
-                  `Exported ${exportType}.`
-                )
-              }
+              onExportLogged={(exportType) => {
+                void runAction(() => api.logExport(exportType));
+              }}
             />
           )}
-          {activeTab === 'settings' && (
+          {workspace && activeTab === 'settings' && (
             <SettingsView
               team={team}
-              onToggleMemberActive={(id) =>
-                setTeam((prev) =>
-                  prev.map((m) => (m.id === id ? { ...m, active: !m.active } : m))
-                )
-              }
+              onToggleMemberActive={(id) => {
+                void runAction(() => api.toggleTeamMember(id));
+              }}
               onAddTeamMember={(member) => {
-                const newMember: TeamMember = {
-                  ...member,
-                  id: `USR-0${team.length + 1}`,
-                  active: true,
-                };
-                setTeam((prev) => [...prev, newMember]);
-                appendAudit(
-                  'Programme Manager',
-                  'Programme Manager',
-                  'TEAM_USER_ADDED',
-                  newMember.id,
-                  `Added ${newMember.name} as ${newMember.role}.`
-                );
+                void runAction(() => api.addTeamMember(member));
               }}
             />
           )}
@@ -1187,9 +955,10 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-lg cursor-pointer"
+                  disabled={newCaseSubmitting}
+                  className="px-5 py-2 font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 disabled:cursor-wait rounded-lg cursor-pointer"
                 >
-                  Create Tracked Case
+                  {newCaseSubmitting ? 'Creating…' : 'Create Tracked Case'}
                 </button>
               </div>
             </form>
@@ -1234,7 +1003,14 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               />
 
               {csvFeedback && (
-                <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                <div
+                  role={csvFeedbackIsError ? 'alert' : 'status'}
+                  className={`text-xs rounded-lg p-3 border ${
+                    csvFeedbackIsError
+                      ? 'text-red-700 bg-red-50 border-red-200'
+                      : 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                  }`}
+                >
                   {csvFeedback}
                 </div>
               )}

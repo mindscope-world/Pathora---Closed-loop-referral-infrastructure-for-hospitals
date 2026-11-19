@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { PathoraMark } from '../PathoraMark';
+import { api } from '../../lib/api';
 
 export interface AuthUserSession {
   name: string;
@@ -20,26 +21,27 @@ export function LoginPage({
   onGoToSignup,
   onBackToSite,
 }: LoginPageProps) {
-  const [email, setEmail] = useState('coordinator@nairobi-screening.org');
-  const [password, setPassword] = useState('••••••••••••');
-  const [workspaceRole, setWorkspaceRole] = useState('Programme Coordinator');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const displayEmail = email.trim() || 'coordinator@pathora.org';
-    const localName = displayEmail.split('@')[0].replace(/[._-]/g, ' ');
-    const formattedName = localName
-      .split(' ')
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
-
-    onSuccess({
-      name: formattedName || 'Miriam Wanjiku',
-      role: workspaceRole,
-      organization: 'Nairobi Preventive Screening Network',
-      email: displayEmail,
-    });
+    if (!email.trim() || !password) {
+      setError('Please enter your work email and password.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const user = await api.login(email.trim(), password);
+      onSuccess(user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign-in failed.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -80,11 +82,20 @@ export function LoginPage({
               Sign in to Pathora
             </h1>
             <p className="text-sm text-slate-600 leading-relaxed">
-              Access your closed-loop referral queue, facility acknowledgments, and programme reporting. Enter any details below to proceed into the workspace.
+              Access your closed-loop referral queue, facility acknowledgments, and programme reporting.
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            {error && (
+              <div
+                role="alert"
+                className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5"
+              >
+                {error}
+              </div>
+            )}
+
             <div>
               <label
                 htmlFor="login-email"
@@ -95,6 +106,7 @@ export function LoginPage({
               <input
                 id="login-email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@organization.org"
@@ -110,46 +122,45 @@ export function LoginPage({
                 >
                   Password
                 </label>
-                <span className="text-xs text-slate-400">Preview access enabled</span>
               </div>
               <input
                 id="login-password"
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter any password"
+                placeholder="Enter your password"
                 className="w-full px-4 py-3 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6] focus:border-transparent"
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="login-role"
-                className="block text-xs font-semibold text-[#061B3A] mb-1.5"
-              >
-                Workspace Role View
-              </label>
-              <select
-                id="login-role"
-                value={workspaceRole}
-                onChange={(e) => setWorkspaceRole(e.target.value)}
-                className="w-full px-4 py-3 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-              >
-                <option value="Programme Coordinator">Programme Coordinator</option>
-                <option value="Programme Manager">Programme Manager</option>
-                <option value="Receiving Facility Focal">Receiving Facility Focal</option>
-                <option value="Partner Clinical Lead">Partner Clinical Lead</option>
-              </select>
-            </div>
-
             <button
               type="submit"
-              className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-full transition-colors duration-150 shadow-sm cursor-pointer mt-2"
+              disabled={submitting}
+              className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 disabled:cursor-wait rounded-full transition-colors duration-150 shadow-sm cursor-pointer mt-2"
             >
-              <span>Sign In to Dashboard</span>
+              <span>{submitting ? 'Signing in…' : 'Sign In to Dashboard'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
+
+          <div className="mt-4 bg-[#F8FAFC] border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Demo account: <span className="font-mono">coordinator@nairobi-screening.org</span> /{' '}
+              <span className="font-mono">pathora-demo</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setEmail('coordinator@nairobi-screening.org');
+                setPassword('pathora-demo');
+                setError(null);
+              }}
+              className="font-semibold text-[#00828C] hover:text-[#061B3A] cursor-pointer"
+            >
+              Use demo account
+            </button>
+          </div>
 
           <div className="mt-6 pt-5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="text-slate-600">New to Pathora?</span>

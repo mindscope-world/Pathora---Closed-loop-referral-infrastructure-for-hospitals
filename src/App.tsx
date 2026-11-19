@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { api, onUnauthorized } from './lib/api';
 import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { WorkflowSplitSection } from './components/WorkflowSplitSection';
@@ -39,9 +40,28 @@ export default function App() {
   };
 
   const handleSignOut = () => {
+    api.logout().catch(() => undefined);
     setCurrentUser(null);
     navigateTo('landing');
   };
+
+  // Restore an existing session on page load, and return to sign-in if it expires.
+  useEffect(() => {
+    onUnauthorized(() => {
+      setCurrentUser(null);
+      setViewMode('login');
+    });
+    if (api.hasSession()) {
+      api
+        .me()
+        .then((user) => {
+          setCurrentUser(user);
+          setViewMode('dashboard');
+        })
+        .catch(() => undefined);
+    }
+    return () => onUnauthorized(null);
+  }, []);
 
   if (viewMode === 'login') {
     return (

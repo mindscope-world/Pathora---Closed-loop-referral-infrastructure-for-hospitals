@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { PathoraMark } from '../PathoraMark';
 import { AuthUserSession } from './LoginPage';
+import { api } from '../../lib/api';
 
 interface SignupPageProps {
   onSuccess: (user: AuthUserSession) => void;
@@ -20,15 +21,41 @@ export function SignupPage({
   const [pathway, setPathway] = useState('Cancer Screening');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    onSuccess({
-      name: fullName.trim() || 'Demo Programme Lead',
-      role,
-      organization: organization.trim() || 'Partner Screening Programme',
-      email: email.trim() || 'team@partner-programme.org',
-    });
+    if (!fullName.trim() || !organization.trim()) {
+      setError('Please enter your full name and organization.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Please provide a valid work email address.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const user = await api.signup({
+        name: fullName.trim(),
+        organization: organization.trim(),
+        email: email.trim(),
+        password,
+        role,
+        primaryPathway: pathway,
+      });
+      onSuccess(user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create your account.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -69,11 +96,20 @@ export function SignupPage({
               Create your Pathora account
             </h1>
             <p className="text-sm text-slate-600 leading-relaxed">
-              Sign up with any details below to explore the Pathora referral accountability workspace right away.
+              Create an account for your team to start tracking referrals in the Pathora workspace.
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            {error && (
+              <div
+                role="alert"
+                className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5"
+              >
+                {error}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
                 <label
@@ -177,18 +213,20 @@ export function SignupPage({
               <input
                 id="signup-password"
                 type="password"
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter any password"
+                placeholder="At least 8 characters"
                 className="w-full px-3.5 py-2.5 text-sm bg-[#F8FAFC] border border-slate-200 rounded-xl text-[#061B3A] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
               />
             </div>
 
             <button
               type="submit"
-              className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-full transition-colors duration-150 shadow-sm cursor-pointer mt-2"
+              disabled={submitting}
+              className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 disabled:cursor-wait rounded-full transition-colors duration-150 shadow-sm cursor-pointer mt-2"
             >
-              <span>Create Account &amp; Enter Dashboard</span>
+              <span>{submitting ? 'Creating account…' : 'Create Account & Enter Dashboard'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>

@@ -1,6 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { X, CheckCircle2, ArrowRight } from 'lucide-react';
 import { PathoraMark } from './PathoraMark';
+import { api } from '../lib/api';
 
 interface DiscoveryModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
   const [pathway, setPathway] = useState(initialPathway || PATHWAY_CHOICES[0]);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (initialPathway) {
@@ -40,7 +42,7 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
     if (!name.trim() || !organization.trim()) {
@@ -52,7 +54,20 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
       return;
     }
     setError(null);
-    setSubmitted(true);
+    setSubmitting(true);
+    try {
+      await api.requestDiscovery({
+        name: name.trim(),
+        organization: organization.trim(),
+        email: email.trim(),
+        pathway,
+      });
+      setSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send your request.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const resetAndClose = () => {
@@ -207,9 +222,10 @@ export function DiscoveryModal({ isOpen, initialPathway, onClose }: DiscoveryMod
               </button>
               <button
                 type="submit"
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-full transition-colors cursor-pointer"
+                disabled={submitting}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#008E97] hover:bg-[#00767E] disabled:opacity-60 disabled:cursor-wait rounded-full transition-colors cursor-pointer"
               >
-                <span>Confirm Request</span>
+                <span>{submitting ? 'Sending…' : 'Confirm Request'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
