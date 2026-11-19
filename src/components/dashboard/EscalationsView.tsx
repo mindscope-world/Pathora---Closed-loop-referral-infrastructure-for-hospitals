@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { AlertTriangle, PhoneCall, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { ReferralCase } from '../../data/dashboardData';
+import { Badge, Button, Card, EmptyState, PageHeader, Select, StatusBadge, cn } from '../ui';
 
 interface EscalationsViewProps {
   cases: ReferralCase[];
@@ -22,132 +22,139 @@ export function EscalationsView({
   onLogBarrierResolution,
   onSelectCase,
 }: EscalationsViewProps) {
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [selectedBarrier, setSelectedBarrier] = useState<string>(BARRIER_OPTIONS[0]);
 
-  const escalatedOrOverdue = cases.filter(
-    (c) =>
-      c.status !== 'Closed Verified' &&
-      (c.status === 'Overdue SLA' || c.stage === 'Escalated' || c.redFlag || c.slaHoursRemaining <= 12)
-  );
+  const queue = cases
+    .filter(
+      (c) =>
+        c.status !== 'Closed Verified' &&
+        (c.status === 'Overdue SLA' || c.stage === 'Escalated' || c.redFlag || c.slaHoursRemaining <= 12)
+    )
+    .sort((a, b) => a.slaHoursRemaining - b.slaHoursRemaining);
+
+  const breachedCount = queue.filter((c) => c.slaHoursRemaining < 0 || c.status === 'Overdue SLA').length;
 
   return (
-    <div className="space-y-6">
-      {/* Top Banner: Barrier Resolution Selector */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="font-display text-base font-bold text-[#061B3A]">
-            SLA Escalation &amp; Barrier Resolution Queue
-          </h2>
-          <p className="text-xs text-slate-600 mt-0.5">
-            Cases approaching or exceeding partner-configured deadlines, red-flag presentations, or digital contact opt-outs.
-          </p>
-        </div>
+    <div>
+      <PageHeader
+        title="Escalations"
+        description="Referrals past or near their SLA, red-flag cases, and patients who need human follow-up."
+      />
 
-        <div className="flex items-center gap-2.5 shrink-0">
-          <label htmlFor="barrier-preset" className="text-xs font-medium text-slate-600 whitespace-nowrap">
-            Resolution Action:
-          </label>
-          <select
-            id="barrier-preset"
-            value={selectedBarrier}
-            onChange={(e) => setSelectedBarrier(e.target.value)}
-            className="px-3 py-2 text-xs bg-[#F8FAFC] border border-slate-200 rounded-lg text-[#061B3A] focus:outline-none focus:ring-2 focus:ring-[#009CA6]"
-          >
-            {BARRIER_OPTIONS.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Queue List */}
-      {escalatedOrOverdue.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-2">
-          <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
-          <p className="font-display text-base font-bold text-[#061B3A]">
-            Zero active SLA breaches
-          </p>
-          <p className="text-sm text-slate-600">
-            All open referrals are currently tracking within partner-approved deadlines.
-          </p>
-        </div>
+      {queue.length === 0 ? (
+        <Card>
+          <EmptyState
+            title="No SLA breaches"
+            description="Every open referral is within its partner-approved deadline."
+          />
+        </Card>
       ) : (
-        <div className="space-y-3.5">
-          {escalatedOrOverdue.map((c) => {
-            const isBreached = c.slaHoursRemaining < 0 || c.status === 'Overdue SLA';
-            return (
-              <div
-                key={c.id}
-                className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-              >
-                <div className="space-y-1.5 min-w-0">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => onSelectCase(c)}
-                      className="font-mono text-xs font-bold text-[#061B3A] hover:underline tabular-nums cursor-pointer"
-                    >
-                      {c.id}
-                    </button>
-                    <span className="text-xs text-slate-500">
-                      {c.patientCode} · {c.pathway}
-                    </span>
-                    {c.redFlag && (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-700">
-                        <ShieldAlert className="w-3.5 h-3.5" />
-                        Clinical Red Flag
+        <Card>
+          <div className="px-5 py-3 border-b border-line flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-ink-2">
+            <span>
+              <span className="font-medium text-ink tabular-nums">{queue.length}</span> in queue
+            </span>
+            <span>
+              <span className="font-medium text-danger tabular-nums">{breachedCount}</span> past SLA
+            </span>
+          </div>
+
+          <ul className="divide-y divide-line">
+            {queue.map((c) => {
+              const breached = c.slaHoursRemaining < 0 || c.status === 'Overdue SLA';
+              const isResolving = resolvingId === c.id;
+              return (
+                <li key={c.id} className="px-5 py-4">
+                  <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onSelectCase(c)}
+                          className="text-sm font-medium text-ink hover:text-brand hover:underline underline-offset-2 cursor-pointer"
+                        >
+                          {c.patientName}
+                        </button>
+                        <span className="font-mono text-xs text-ink-3">{c.id}</span>
+                        <StatusBadge status={c.status} />
+                        {c.redFlag && <Badge tone="danger">Red flag</Badge>}
+                      </div>
+                      <p className="text-[13px] text-ink-2 leading-relaxed">{c.notes}</p>
+                      <p className="text-xs text-ink-3">
+                        {c.pathway} · {c.coordinator} · {c.receivingFacility}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span
+                        className={cn(
+                          'text-[13px] tabular-nums whitespace-nowrap',
+                          breached ? 'text-danger font-medium' : 'text-ink-2'
+                        )}
+                      >
+                        {c.slaHoursRemaining < 0
+                          ? `${Math.abs(c.slaHoursRemaining)}h overdue`
+                          : `${c.slaHoursRemaining}h left`}
                       </span>
-                    )}
-                    <span
-                      className={`inline-flex items-center gap-1 text-xs font-mono font-semibold tabular-nums ${
-                        isBreached ? 'text-red-700' : 'text-amber-700'
-                      }`}
-                    >
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      {c.slaHoursRemaining < 0
-                        ? `${Math.abs(c.slaHoursRemaining)}h overdue`
-                        : `${c.slaHoursRemaining}h remaining`}
-                    </span>
+                      {c.stage !== 'Escalated' && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() =>
+                            onEscalateToClinicalLead(c.id, 'Escalated to Partner Clinical Lead due to SLA window')
+                          }
+                        >
+                          Escalate
+                        </Button>
+                      )}
+                      <Button
+                        variant={isResolving ? 'ghost' : 'secondary'}
+                        size="sm"
+                        onClick={() => {
+                          setResolvingId(isResolving ? null : c.id);
+                          setSelectedBarrier(BARRIER_OPTIONS[0]);
+                        }}
+                      >
+                        {isResolving ? 'Cancel' : 'Log resolution'}
+                      </Button>
+                    </div>
                   </div>
 
-                  <p className="text-sm text-slate-700 leading-relaxed">{c.notes}</p>
-                  <p className="text-xs text-slate-500">
-                    Owner: <span className="font-medium text-[#061B3A]">{c.coordinator}</span> · Destination:{' '}
-                    <span className="font-medium text-[#061B3A]">{c.receivingFacility}</span>
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  {c.stage !== 'Escalated' && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onEscalateToClinicalLead(
-                          c.id,
-                          'Escalated to Partner Clinical Lead due to SLA window'
-                        )
-                      }
-                      className="px-3.5 py-2 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                  {isResolving && (
+                    <form
+                      className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2 rounded-md bg-subtle p-3"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        onLogBarrierResolution(c.id, selectedBarrier);
+                        setResolvingId(null);
+                      }}
                     >
-                      Escalate to Clinical Lead
-                    </button>
+                      <label htmlFor={`barrier-${c.id}`} className="text-[13px] text-ink-2 whitespace-nowrap">
+                        Resolution
+                      </label>
+                      <Select
+                        id={`barrier-${c.id}`}
+                        value={selectedBarrier}
+                        onChange={(e) => setSelectedBarrier(e.target.value)}
+                        className="h-8 sm:max-w-sm"
+                      >
+                        {BARRIER_OPTIONS.map((b) => (
+                          <option key={b} value={b}>
+                            {b}
+                          </option>
+                        ))}
+                      </Select>
+                      <Button type="submit" size="sm">
+                        Save resolution
+                      </Button>
+                    </form>
                   )}
-
-                  <button
-                    type="button"
-                    onClick={() => onLogBarrierResolution(c.id, selectedBarrier)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#008E97] hover:bg-[#00767E] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-                  >
-                    <PhoneCall className="w-3.5 h-3.5" />
-                    <span>Log Coordinator Resolution</span>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
       )}
     </div>
   );

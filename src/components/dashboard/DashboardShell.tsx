@@ -394,9 +394,10 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
             <Menu className="size-5" />
           </button>
 
-          <h1 className="text-[15px] font-semibold text-ink truncate">{activeLabel}</h1>
+          {/* Each view renders its own page title; this label is for screen readers only. */}
+          <span className="sr-only">{activeLabel}</span>
 
-          <div className="relative ml-auto w-full max-w-xs">
+          <div className="relative flex-1 min-w-0 max-w-sm">
             <Search className="size-4 text-ink-3 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="search"
@@ -457,11 +458,13 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
             )}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <Button variant="secondary" size="sm" className="hidden md:inline-flex" onClick={() => setCsvModalOpen(true)}>
-              <Upload />
-              Import CSV
-            </Button>
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            <span className="hidden md:contents">
+              <Button variant="secondary" size="sm" onClick={() => setCsvModalOpen(true)}>
+                <Upload />
+                Import CSV
+              </Button>
+            </span>
             <Button size="sm" onClick={() => setNewCaseModalOpen(true)}>
               <Plus />
               <span className="hidden sm:inline">Log positive screen</span>

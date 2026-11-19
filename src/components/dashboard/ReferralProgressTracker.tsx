@@ -102,7 +102,7 @@ export function ReferralProgressTracker({ referral, variant = 'full' }: Referral
 
   if (variant === 'compact') {
     return (
-      <div className="w-[168px] space-y-1.5" title={steps.map((s) => `${s.label}: ${s.detail}`).join('\n')}>
+      <div className="relative w-[168px] space-y-1.5" title={steps.map((s) => `${s.label}: ${s.detail}`).join('\n')}>
         <div className="flex items-center justify-between gap-2 text-xs">
           <span className={cn('truncate', attention ? 'text-danger font-medium' : 'text-ink-2')}>{label}</span>
           <span className="tabular-nums text-ink-3 shrink-0">{completedCount}/4</span>
