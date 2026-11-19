@@ -76,6 +76,7 @@ const RULE_PACK_PATHWAY: Record<string, Pathway> = {
   'RP-CANCER': 'CANCER_SCREENING', 'RP-NCD': 'NCD_SCREENING',
   'RP-MALE': 'MALE_REPRODUCTIVE_HEALTH', 'RP-MCH': 'MATERNAL_CHILD_HEALTH',
 };
+const RED_FLAG_HOURS: Record<string, number> = { 'RP-CANCER': 24, 'RP-NCD': 4 };
 const MILESTONES: Array<[keyof (typeof raw.cases)[number]['milestones'], MilestoneType]> = [
   ['referralIssuedAt', 'REFERRAL_ISSUED'],
   ['facilityAcknowledgedAt', 'FACILITY_ACKNOWLEDGED'],
@@ -122,7 +123,7 @@ async function main() {
   const result = await prisma.$transaction(
     async (tx) => {
       const org = await tx.organization.create({
-        data: { name: ORG_NAME, type: 'PROGRAMME', retentionDays: 365, dpoContact: 'David Kamau (dpo@partner-network.org)' },
+        data: { name: ORG_NAME, type: 'PROGRAMME', retentionDays: 365, dpoContact: 'David Kamau (dpo@partner-network.org)', supportPhone: '0700 000 000' },
       });
 
       const facilityIds = new Map<string, string>();
@@ -166,6 +167,8 @@ async function main() {
             status: rulePackStatus(rp.status), ackSlaHours: rp.ackSlaHours, contactSlaHours: rp.contactSlaHours,
             evalTargetDays: rp.evalTargetDays, clinicalOwnerId: userIds.get(ownerName) ?? null,
             redFlagRule: rp.redFlagRule, closureCriteria: rp.closureCriteria, effectiveFrom: parseEat('2026-11-01'),
+            // The structured form of the red-flag wording (cancer: 24h, NCD: 4h; the others describe routing, not a timer).
+            redFlagPolicy: { unacknowledgedHours: RED_FLAG_HOURS[rp.id] ?? null },
           },
         });
         rulePackByPathway.set(RULE_PACK_PATHWAY[rp.id], {
@@ -188,6 +191,7 @@ async function main() {
       // Cases (+ patients, consent, milestones)
       let maxRef = 0;
       const caseIds = new Map<string, string>(); // demo id → db id
+      const patientIdByCase = new Map<string, string>(); // demo id → patient id
       for (const c of raw.cases) {
         const issuedAt = parseEat(c.milestones.referralIssuedAt);
         const pack = rulePackByPathway.get(pathway(c.pathway))!;
@@ -230,6 +234,7 @@ async function main() {
           },
         });
         caseIds.set(c.id, row.id);
+        patientIdByCase.set(c.id, patient.id);
         maxRef = Math.max(maxRef, Number(c.id.split('-')[2]));
 
         for (const [key, type] of MILESTONES) {
@@ -242,9 +247,10 @@ async function main() {
       for (const m of raw.commsLog) {
         await tx.commsLog.create({
           data: {
-            orgId: org.id, caseId: caseIds.get(m.caseId)!, channel: channel(m.channel),
+            orgId: org.id, caseId: caseIds.get(m.caseId)!, patientId: patientIdByCase.get(m.caseId)!, channel: channel(m.channel),
             templateId: templateIds.get(m.templateName) ?? null, templateName: m.templateName,
-            status: delivery(m.deliveryStatus), sentAt: parseEat(m.timestamp),
+            status: delivery(m.deliveryStatus), requestedAt: parseEat(m.timestamp),
+            sentAt: ['DELIVERED', 'READ'].includes(delivery(m.deliveryStatus)) ? parseEat(m.timestamp) : null,
           },
         });
       }

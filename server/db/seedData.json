@@ -223,7 +223,7 @@
       "pathway": "All Pathways",
       "channel": "SMS",
       "language": "English",
-      "body": "Hello, this is your care coordinator from the screening team. Your follow-up slot is ready at {facility}. Reply 1 to confirm or call {phone} for support.",
+      "body": "Hello, this is your care coordinator. Your follow-up slot is ready at {facility}. Reply 1 to confirm or call {phone} for support.",
       "reviewedBy": "Clinical & Community Advisory Panel"
     },
     {

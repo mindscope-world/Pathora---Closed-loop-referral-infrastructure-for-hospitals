@@ -86,6 +86,7 @@ export function toViewCase(c: CaseDto): ReferralCase {
     closureReason: c.closureReason ?? undefined,
     outcomeSource: c.outcomeSource ?? undefined,
     milestones: milestones(c.milestones),
+    hasPhone: c.hasPhone,
     coordinatorId: c.coordinator.id,
     facilityId: c.facility.id,
     version: c.version,

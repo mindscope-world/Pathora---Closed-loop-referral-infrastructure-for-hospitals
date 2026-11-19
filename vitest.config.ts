@@ -8,6 +8,7 @@ const testEnv = {
   APP_URL: 'http://localhost:3000',
   JWT_SECRET: 'test-jwt-secret-test-jwt-secret-0123456789',
   COOKIE_SECRET: 'test-cookie-secret-test-cookie-0123456789',
+  MESSAGING_WEBHOOK_SECRET: 'test-webhook-secret-0123456789abcdef',
   FIELD_ENCRYPTION_KEY: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
 };
 

@@ -29,6 +29,9 @@ export const PERMISSIONS = {
   // Patient communications & consent
   'comms.read': [MANAGER, COORDINATOR, CLINICAL, DPO],
   'comms.send': [MANAGER, COORDINATOR],
+  // Message wording: staff draft it, the clinical lead approves it (nothing unapproved can be sent).
+  'templates.manage': [MANAGER, COORDINATOR],
+  'templates.approve': [CLINICAL],
   'consent.manage': [DPO],
   // Pathway rules
   'rulepacks.read': ALL,

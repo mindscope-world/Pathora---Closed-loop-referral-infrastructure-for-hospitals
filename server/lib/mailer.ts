@@ -61,3 +61,12 @@ export function inviteEmail(p: { to: string; inviteeName: string; inviterName: s
     ].join('\n'),
   };
 }
+
+/** Alert email for a notification. Carries only the referral number and facility, never patient details. */
+export function notificationEmail(p: { to: string; recipientName: string; title: string; body: string; appUrl: string }): MailMessage {
+  return {
+    to: p.to,
+    subject: `Pathora: ${p.title}`,
+    text: [`Hello ${p.recipientName},`, '', p.body, '', `Sign in to review and act: ${p.appUrl}`].join('\n'),
+  };
+}
