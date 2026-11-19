@@ -19,6 +19,7 @@ import { kickMessageWorker } from './jobs/messageWorker';
 import { invitesRouter, usersRouter } from './modules/team/routes';
 import { auditRouter } from './modules/audit/routes';
 import { exportsRouter } from './modules/exports/routes';
+import { leadsRouter } from './modules/leads/routes';
 import { metricsRouter } from './modules/metrics/routes';
 import { reportSchedulesRouter } from './modules/reports/routes';
 import { redactToken } from './modules/exports/signedUrl';
@@ -38,6 +39,7 @@ const healthz: RequestHandler = (_req, res) => {
 export interface AppOptions {
   auth?: AuthRouterOptions;
   invites?: { maxPerIp?: number };
+  leads?: { maxPerIp?: number };
   messages?: {
     /** Called after a message is queued so it goes out promptly. Tests replace it to drive the worker by hand. */
     kick?: () => void;
@@ -107,6 +109,7 @@ export function createApp(options: AppOptions = {}): Express {
   api.use('/rule-packs', rulePacksRouter());
   api.use('/notifications', notificationsRouter());
   api.use('/audit', auditRouter());
+  api.use('/leads', leadsRouter({ maxPerIp: options.leads?.maxPerIp }));
   api.use('/metrics', metricsRouter());
   api.use('/report-schedules', reportSchedulesRouter());
   api.use(

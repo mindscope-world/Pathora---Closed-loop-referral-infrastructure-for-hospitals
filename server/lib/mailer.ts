@@ -70,3 +70,12 @@ export function notificationEmail(p: { to: string; recipientName: string; title:
     text: [`Hello ${p.recipientName},`, '', p.body, '', `Sign in to review and act: ${p.appUrl}`].join('\n'),
   };
 }
+
+/** Tells the team about a walkthrough request. Text only; the values were validated as single-line. */
+export function leadEmail(p: { to: string; name: string; organization: string; email: string; pathway: string }): MailMessage {
+  return {
+    to: p.to,
+    subject: `Pathora walkthrough request: ${p.organization}`,
+    text: ['New walkthrough request from the website.', '', `Name: ${p.name}`, `Organization: ${p.organization}`, `Email: ${p.email}`, `Pathway: ${p.pathway}`].join('\n'),
+  };
+}
