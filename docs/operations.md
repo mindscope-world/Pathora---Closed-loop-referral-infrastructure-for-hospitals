@@ -20,7 +20,7 @@ per-IP limits see client addresses.
 
 ## Configuration
 
-Required: `DATABASE_URL`, `APP_URL` (**https** in production), `JWT_SECRET`, `COOKIE_SECRET` (different values),
+Required: `DATABASE_URL`, `APP_URL` (**https** in production, and exactly the address people use in the browser: requests from any other origin get `403 CORS_DENIED`), `JWT_SECRET`, `COOKIE_SECRET` (different values),
 `FIELD_ENCRYPTION_KEY` (base64, 32 bytes). **The server refuses to start in production** with placeholder values, a reused
 JWT/cookie secret, or an http `APP_URL`.
 
