@@ -8,9 +8,10 @@ import { startRetentionPurge } from './jobs/retentionPurge';
 import { startReportScheduler } from './jobs/reportScheduler';
 
 const app = createApp();
-const server = app.listen(env.PORT, () => {
-  logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Pathora API listening');
-});
+const onListening = () => {
+  logger.info({ port: env.PORT, host: env.HOST ?? 'default', address: server.address(), env: env.NODE_ENV }, 'Pathora API listening');
+};
+const server = env.HOST ? app.listen(env.PORT, env.HOST, onListening) : app.listen(env.PORT, onListening);
 const stopExportWorker = startExportWorker();
 const stopSlaMonitor = startSlaMonitor();
 const stopMessageWorker = startMessageWorker();
