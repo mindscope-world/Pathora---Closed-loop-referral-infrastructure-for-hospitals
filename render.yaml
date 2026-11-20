@@ -39,7 +39,8 @@ services:
         sync: false            # enter a key you generated yourself AND back up outside Render (see the guide):
                                # it encrypts every patient name and phone number, and losing it loses them for good
       - key: APP_URL
-        sync: false            # the public https address people will use, e.g. https://pathora.onrender.com or your domain
+        sync: false            # EXACTLY the https address people type in the browser (scheme, host, port), e.g.
+                               # https://pathora.onrender.com or your domain. A mismatch makes sign-in fail with 403.
       - key: MESSAGING_PROVIDER
         sync: false            # `africastalking` to send real messages; `mock` sends NOTHING (it only pretends)
       - key: TRUST_PROXY
