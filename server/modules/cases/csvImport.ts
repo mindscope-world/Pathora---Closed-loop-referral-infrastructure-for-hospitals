@@ -3,6 +3,7 @@ import { parse } from 'csv-parse/sync';
 import { PATHWAY_LABELS, type ImportCasesRequest, type ImportCasesResponse, type ImportRowResult, type PathwayId } from '../../../shared/types';
 import { forOrg } from '../../db/tenant';
 import { HttpError } from '../../lib/errors';
+import { normalizePhone } from '../../lib/phone';
 import type { AuthContext } from '../../types';
 import { bulkInsertCases, type BulkItem, type Tx } from './service';
 
@@ -40,7 +41,7 @@ function parseCsv(csv: string): Rec[] {
 }
 
 /**
- * Columns: patientCode, cohortLabel, pathway, sourceProgram, owner, facility[, patientName]
+ * Columns: patientCode, cohortLabel, pathway, sourceProgram, owner, facility[, patientName[, mobileNumber]]
  *
  * Valid rows are imported and invalid rows are reported with a reason, so one typo does not block a
  * 200-row batch. Validation and writing share one code path; a dry run executes it inside a
@@ -88,6 +89,9 @@ export async function importCases(auth: AuthContext, req: ImportCasesRequest): P
       const ownerIds = ownersByName.get((c[4] ?? '').toLowerCase()) ?? [];
       if (ownerIds.length === 0) return fail(`Unknown or inactive owner "${c[4] ?? ''}"`);
       if (ownerIds.length > 1) return fail(`Owner name "${c[4]}" is ambiguous`);
+      const rawPhone = (c[7] ?? '').trim();
+      const patientPhone = rawPhone ? normalizePhone(rawPhone) : null;
+      if (rawPhone && !patientPhone) return fail(`Invalid mobile number "${rawPhone}"`);
 
       candidates.push({
         idx, line, code: code.toUpperCase(),
@@ -96,6 +100,7 @@ export async function importCases(auth: AuthContext, req: ImportCasesRequest): P
           input: {
             patientCode: code.toUpperCase(), patientName: c[6] || undefined, patientLabel: c[1] || 'CSV imported cohort',
             pathway, sourceProgram: c[3] || DEFAULT_SOURCE, coordinatorId: ownerIds[0], facilityId: facility.id,
+            patientPhone: patientPhone ?? undefined,
             redFlag: false, consentSms: true, consentBasis: 'Programme attestation of patient consent at CSV import',
             notes: 'Imported via secure CSV intake.',
           },

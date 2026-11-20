@@ -29,6 +29,9 @@ export const PERMISSIONS = {
   // Patient communications & consent
   'comms.read': [MANAGER, COORDINATOR, CLINICAL, DPO],
   'comms.send': [MANAGER, COORDINATOR],
+  // Message wording: staff draft it, the clinical lead approves it (nothing unapproved can be sent).
+  'templates.manage': [MANAGER, COORDINATOR],
+  'templates.approve': [CLINICAL],
   'consent.manage': [DPO],
   // Pathway rules
   'rulepacks.read': ALL,
@@ -44,6 +47,10 @@ export const PERMISSIONS = {
   'facilities.read': ALL,
   'facilities.manage': [MANAGER],
   'metrics.read': ALL,
+  // Facility system credentials (API keys) for status-return and referral pull.
+  'integrations.manage': [MANAGER],
+  // Data subject requests: look up everything held about a person, or erase their personal data.
+  'privacy.manage': [DPO],
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

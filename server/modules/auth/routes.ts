@@ -27,7 +27,7 @@ function setRefreshCookie(res: Response, session: auth.Session) {
 const clearRefreshCookie = (res: Response) =>
   res.clearCookie(REFRESH_COOKIE, { httpOnly: true, secure: isProd, sameSite: 'strict', path: COOKIE_PATH });
 
-function sendSession(res: Response, session: auth.Session, status = 200) {
+export function sendSession(res: Response, session: auth.Session, status = 200) {
   setRefreshCookie(res, session);
   res.setHeader('Cache-Control', 'no-store');
   res.status(status).json(session.response satisfies AuthSessionResponse);

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizePhone } from '../../lib/phone';
 
 const text = (min: number, max: number, what: string) =>
   z.string().trim().min(min, `${what} is required`).max(max, `${what} must be at most ${max} characters`);
@@ -7,6 +8,22 @@ const expectedVersion = z.number().int().positive().optional();
 const pathway = z.enum(['CANCER_SCREENING', 'NCD_SCREENING', 'MALE_REPRODUCTIVE_HEALTH', 'MATERNAL_CHILD_HEALTH']);
 
 export const refParam = z.string().regex(/^REF-\d{4}-\d{4,}$/);
+
+/** A mobile number in any common format, normalised to +254… (blank means none). Rejected if it is not a number we could text. */
+const phone = z
+  .string()
+  .trim()
+  .max(40)
+  .transform((v, ctx) => {
+    if (v === '') return undefined;
+    const n = normalizePhone(v);
+    if (!n) {
+      ctx.addIssue({ code: 'custom', message: 'Enter a valid mobile number, for example 0712 345 678 or +254 712 345 678' });
+      return z.NEVER;
+    }
+    return n;
+  })
+  .optional();
 
 export const createCaseSchema = z
   .object({
@@ -19,6 +36,7 @@ export const createCaseSchema = z
     facilityId: text(1, 64, 'Receiving facility'),
     redFlag: z.boolean().default(false),
     consentSms: z.boolean().default(false),
+    patientPhone: phone,
     notes: text(1, 1000, 'Notes').optional(),
   })
   .refine((v) => v.patientName || v.patientCode, { message: 'Enter a patient name or an identifier code', path: ['patientName'] });

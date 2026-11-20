@@ -9,6 +9,7 @@ import { importCases } from './csvImport';
 import { listQuerySchema } from './queries';
 import * as schemas from './schemas';
 import * as svc from './service';
+import { channelConsentSchema, contactSchema, sendMessageSchema, sendMessage, setChannelConsent, setContact } from '../comms/messages';
 
 /** Case id from the URL; anything that is not a REF-YYYY-NNNN id is simply "not found". */
 function refOf(req: Request): string {
@@ -24,7 +25,7 @@ function requireAny(...permissions: Permission[]) {
   };
 }
 
-export function casesRouter(): Router {
+export function casesRouter(opts: { kickMessages?: () => void } = {}): Router {
   const r = Router();
   r.use(authenticate);
   const noStore = (_req: Request, res: { setHeader(n: string, v: string): void }, next: () => void) => {
@@ -77,18 +78,33 @@ export function casesRouter(): Router {
   r.post('/:id/reassign', requirePermission('cases.reassign'), validateBody(schemas.reassignSchema),
     asyncHandler(async (req, res) => res.json(await svc.reassignCase(req.auth!, refOf(req), req.body, req.body.expectedVersion))));
 
+  // ── patient messaging, contact number and consent ──
+  r.post('/:id/messages', requirePermission('comms.send'), validateBody(sendMessageSchema), idempotent, asyncHandler(async (req, res) => {
+    const { response, kick } = await sendMessage(req.auth!, refOf(req), req.body);
+    if (kick) opts.kickMessages?.();
+    res.status(response.accepted ? 202 : 200).json(response);
+  }));
+
+  r.put('/:id/contact', requirePermission('comms.send'), validateBody(contactSchema), asyncHandler(async (req, res) => {
+    res.json(await setContact(req.auth!, refOf(req), req.body.phone));
+  }));
+
+  r.put('/:id/consent', requirePermission('consent.manage'), validateBody(channelConsentSchema), asyncHandler(async (req, res) => {
+    await setChannelConsent(req.auth!, refOf(req), req.body);
+    res.json(await svc.getCaseSummary(req.auth!, refOf(req)));
+  }));
+
   r.put('/:id/opt-out', requirePermission('consent.manage'), validateBody(schemas.optOutSchema),
     asyncHandler(async (req, res) => res.json(await svc.setOptOut(req.auth!, refOf(req), req.body.optedOut))));
 
   return r;
 }
 
-/** Reference data the dashboard needs alongside cases. */
-export function facilitiesRouter(): Router {
+export function escalationsRouter(): Router {
   const r = Router();
-  r.get('/', authenticate, requirePermission('facilities.read'), asyncHandler(async (req, res) => {
+  r.get('/', authenticate, requirePermission('cases.read'), asyncHandler(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ facilities: await svc.listFacilities(req.auth!) });
+    res.json({ cases: await svc.listEscalations(req.auth!) });
   }));
   return r;
 }

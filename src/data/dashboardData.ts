@@ -42,6 +42,8 @@ export interface ReferralCase {
   closureReason?: string;
   outcomeSource?: string;
   milestones: CaseMilestones;
+  /** A mobile number is on file for the patient (the number itself is never sent to the browser). */
+  hasPhone?: boolean;
   /** Present on cases loaded from the API; used to address mutations. */
   coordinatorId?: string;
   facilityId?: string;
@@ -57,39 +59,9 @@ export interface FacilityPartner {
   focalPerson: string;
   interopMethod: 'Portal + CSV' | 'API Ready' | 'Status-Return Desk';
   avgAckHours: number;
-}
-
-export interface MessageTemplate {
-  id: string;
-  name: string;
-  pathway: PathwayName | 'All Pathways';
-  channel: 'SMS' | 'WhatsApp';
-  language: 'English' | 'Kiswahili';
-  body: string;
-  reviewedBy: string;
-}
-
-export interface CommsLogEntry {
-  id: string;
-  caseId: string;
-  patientCode: string;
-  channel: 'SMS' | 'WhatsApp' | 'Voice Call';
-  templateName: string;
-  deliveryStatus: 'Delivered' | 'Read' | 'Blocked (Opt-out)' | 'Human Routed';
-  timestamp: string;
-}
-
-export interface PathwayRulePack {
-  id: string;
-  name: string;
-  version: string;
-  status: 'Active' | 'Configured' | 'Coming Soon';
-  ackSlaHours: number;
-  contactSlaHours: number;
-  evalTargetDays: number;
-  clinicalOwner: string;
-  redFlagRule: string;
-  closureCriteria: string;
+  /** API enum values, present on facilities loaded from the server (used by the edit form). */
+  typeId?: 'PUBLIC_REFERRAL' | 'FAITH_BASED' | 'PRIVATE_SPECIALIST' | 'COUNTY_DIAGNOSTIC';
+  interopId?: 'PORTAL_CSV' | 'API_READY' | 'STATUS_RETURN_DESK';
 }
 
 export interface AuditEvent {
@@ -100,20 +72,6 @@ export interface AuditEvent {
   action: string;
   resourceId: string;
   detail: string;
-}
-
-export interface TeamMember {
-  id: string;
-  name: string;
-  role:
-    | 'Programme Manager'
-    | 'Programme Coordinator'
-    | 'Receiving Facility Focal'
-    | 'Partner Clinical Lead'
-    | 'Data Protection Contact';
-  organization: string;
-  accessScope: string;
-  active: boolean;
 }
 
 export const INITIAL_FACILITIES: FacilityPartner[] = [
@@ -335,126 +293,6 @@ export const INITIAL_CASES: ReferralCase[] = [
   },
 ];
 
-export const MESSAGE_TEMPLATES: MessageTemplate[] = [
-  {
-    id: 'TPL-01',
-    name: 'Discreet Next-Step Check-In (EN)',
-    pathway: 'All Pathways',
-    channel: 'SMS',
-    language: 'English',
-    body: 'Hello, this is your care coordinator from the screening team. Your follow-up slot is ready at {facility}. Reply 1 to confirm or call {phone} for support.',
-    reviewedBy: 'Clinical & Community Advisory Panel',
-  },
-  {
-    id: 'TPL-02',
-    name: 'Mwongozo wa Miadi ya Kliniki (SW)',
-    pathway: 'Cancer Screening',
-    channel: 'WhatsApp',
-    language: 'Kiswahili',
-    body: 'Habari, hili ni kumbusho la siri kuhusu miadi yako ya ufuatiliaji katika {facility}. Jibu NDIYO kuthibitisha au wasiliana nasi kwa msaada wa usafiri.',
-    reviewedBy: 'Clinical & Community Advisory Panel',
-  },
-  {
-    id: 'TPL-03',
-    name: 'NCD Confirmatory Assessment Prompt',
-    pathway: 'NCD Screening',
-    channel: 'SMS',
-    language: 'English',
-    body: 'Reminder: please visit {facility} within 48 hours for your confirmatory check-up. No clinical details are shared in this message.',
-    reviewedBy: 'Partner Clinical Lead',
-  },
-  {
-    id: 'TPL-04',
-    name: 'Private Specialist Portal Access',
-    pathway: 'Male Reproductive Health',
-    channel: 'WhatsApp',
-    language: 'English',
-    body: 'Your private follow-up summary is ready. Tap your secure link to view next steps or choose a preferred clinic time.',
-    reviewedBy: 'Cultural & Community Adviser',
-  },
-];
-
-export const INITIAL_COMMS_LOG: CommsLogEntry[] = [
-  {
-    id: 'MSG-901',
-    caseId: 'REF-2026-0418',
-    patientCode: 'PT-8841',
-    channel: 'WhatsApp',
-    templateName: 'Mwongozo wa Miadi ya Kliniki (SW)',
-    deliveryStatus: 'Read',
-    timestamp: '2026-11-17 10:05',
-  },
-  {
-    id: 'MSG-902',
-    caseId: 'REF-2026-0419',
-    patientCode: 'PT-8842',
-    channel: 'SMS',
-    templateName: 'NCD Confirmatory Assessment Prompt',
-    deliveryStatus: 'Delivered',
-    timestamp: '2026-11-15 12:10',
-  },
-  {
-    id: 'MSG-903',
-    caseId: 'REF-2026-0424',
-    patientCode: 'PT-8847',
-    channel: 'Voice Call',
-    templateName: 'Human Coordinator Barrier Check',
-    deliveryStatus: 'Blocked (Opt-out)',
-    timestamp: '2026-11-16 09:30',
-  },
-];
-
-export const INITIAL_RULE_PACKS: PathwayRulePack[] = [
-  {
-    id: 'RP-CANCER',
-    name: 'Cancer Screening Pathway',
-    version: 'v2.1',
-    status: 'Active',
-    ackSlaHours: 24,
-    contactSlaHours: 12,
-    evalTargetDays: 7,
-    clinicalOwner: 'Dr. Grace Njeri (Partner Clinical Lead)',
-    redFlagRule: 'Immediate human coordinator escalation if high-grade lesion signal unacknowledged > 24h.',
-    closureCriteria: 'Authorized colposcopy, biopsy, or specialist evaluation documented by receiving facility.',
-  },
-  {
-    id: 'RP-NCD',
-    name: 'NCD Screening Pathway (Hypertension & Diabetes)',
-    version: 'v1.4',
-    status: 'Active',
-    ackSlaHours: 48,
-    contactSlaHours: 24,
-    evalTargetDays: 10,
-    clinicalOwner: 'Dr. Samuel Korir (Partner Clinical Lead)',
-    redFlagRule: 'Route severe hypertensive reading signals directly to human coordinator within 4 hours.',
-    closureCriteria: 'Confirmatory clinic attendance and baseline care plan recorded.',
-  },
-  {
-    id: 'RP-MALE',
-    name: 'Male Reproductive Health Pathway',
-    version: 'v1.0',
-    status: 'Configured',
-    ackSlaHours: 48,
-    contactSlaHours: 24,
-    evalTargetDays: 14,
-    clinicalOwner: 'Dr. Hassan Bakari (Urology Adviser)',
-    redFlagRule: 'Acute presentation flags route strictly to partner-approved emergency contact protocol.',
-    closureCriteria: 'Private specialist evaluation completed and consented terminal status logged.',
-  },
-  {
-    id: 'RP-MCH',
-    name: 'Maternal & Child Health Pathway',
-    version: 'Planned',
-    status: 'Coming Soon',
-    ackSlaHours: 12,
-    contactSlaHours: 6,
-    evalTargetDays: 3,
-    clinicalOwner: 'Pending Partner Clinical Governance Sign-Off',
-    redFlagRule: 'Multi-level obstetric escalation rules under clinical review.',
-    closureCriteria: 'Multi-tier facility handoff and maternal/neonatal evaluation documented.',
-  },
-];
-
 export const INITIAL_AUDIT_EVENTS: AuditEvent[] = [
   {
     id: 'AUD-501',
@@ -500,48 +338,5 @@ export const INITIAL_AUDIT_EVENTS: AuditEvent[] = [
     action: 'OUTCOME_VERIFIED_CLOSURE',
     resourceId: 'REF-2026-0421',
     detail: 'Documented clinical outcome and closed case with verified audit trail.',
-  },
-];
-
-export const INITIAL_TEAM: TeamMember[] = [
-  {
-    id: 'USR-01',
-    name: 'Dr. Grace Njeri',
-    role: 'Partner Clinical Lead',
-    organization: 'Nairobi Screening Programme',
-    accessScope: 'Approves pathway rules, red flags & closure criteria',
-    active: true,
-  },
-  {
-    id: 'USR-02',
-    name: 'Miriam Wanjiku',
-    role: 'Programme Coordinator',
-    organization: 'Nairobi Screening Programme',
-    accessScope: 'Manages active referrals, patient follow-up & escalations',
-    active: true,
-  },
-  {
-    id: 'USR-03',
-    name: 'Peter Omondi',
-    role: 'Programme Coordinator',
-    organization: 'Kisumu Community Health Network',
-    accessScope: 'Manages NCD cohort intake, handoffs & barrier resolution',
-    active: true,
-  },
-  {
-    id: 'USR-04',
-    name: 'Sr. Beatrice Muthoni',
-    role: 'Receiving Facility Focal',
-    organization: 'Kenyatta Referral Outpatient Desk',
-    accessScope: 'Acknowledges incoming referrals & returns outcome status',
-    active: true,
-  },
-  {
-    id: 'USR-05',
-    name: 'David Kamau',
-    role: 'Data Protection Contact',
-    organization: 'Partner Legal & Compliance',
-    accessScope: 'Audits consent logs, access history & retention policies',
-    active: true,
   },
 ];

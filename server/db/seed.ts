@@ -8,6 +8,7 @@
  * Every user gets the same demo password (SEED_PASSWORD, default below). Never run in production.
  */
 import { hash } from 'argon2';
+import { ROLE_SCOPES } from '../../shared/types';
 import { env } from '../config/env';
 import { aad, encryptField } from '../lib/crypto';
 import { nameTokens } from '../lib/searchIndex';
@@ -75,6 +76,7 @@ const RULE_PACK_PATHWAY: Record<string, Pathway> = {
   'RP-CANCER': 'CANCER_SCREENING', 'RP-NCD': 'NCD_SCREENING',
   'RP-MALE': 'MALE_REPRODUCTIVE_HEALTH', 'RP-MCH': 'MATERNAL_CHILD_HEALTH',
 };
+const RED_FLAG_HOURS: Record<string, number> = { 'RP-CANCER': 24, 'RP-NCD': 4 };
 const MILESTONES: Array<[keyof (typeof raw.cases)[number]['milestones'], MilestoneType]> = [
   ['referralIssuedAt', 'REFERRAL_ISSUED'],
   ['facilityAcknowledgedAt', 'FACILITY_ACKNOWLEDGED'],
@@ -111,6 +113,7 @@ async function main() {
     { name: 'Dr. Daniel Kiprop', role: 'FACILITY_FOCAL', affiliation: 'St. Luke Mission Diagnostic Centre', accessScope: 'Acknowledges incoming referrals & returns outcome status', facility: facilityFocals['Dr. Daniel Kiprop'] },
     { name: 'Grace Atieno, RN', role: 'FACILITY_FOCAL', affiliation: 'Kisumu County Specialty Clinic', accessScope: 'Acknowledges incoming referrals & returns outcome status', facility: facilityFocals['Grace Atieno, RN'] },
     { name: 'Dr. Hassan Bakari', role: 'FACILITY_FOCAL', affiliation: 'Pwani Regional Care Hospital', accessScope: 'Acknowledges incoming referrals & returns outcome status', facility: facilityFocals['Dr. Hassan Bakari'] },
+    { name: 'Joyce Wairimu', role: 'PROGRAMME_MANAGER', affiliation: 'Nairobi Screening Programme', accessScope: ROLE_SCOPES.PROGRAMME_MANAGER },
     { name: 'Dr. Samuel Korir', role: 'CLINICAL_LEAD', affiliation: 'Partner Clinical Governance', accessScope: 'Approves pathway rules, red flags & closure criteria' },
   ];
   for (const e of extras) if (!users.some((u) => u.name === e.name)) users.push(e);
@@ -120,7 +123,7 @@ async function main() {
   const result = await prisma.$transaction(
     async (tx) => {
       const org = await tx.organization.create({
-        data: { name: ORG_NAME, type: 'PROGRAMME', retentionDays: 365, dpoContact: 'David Kamau (dpo@partner-network.org)' },
+        data: { name: ORG_NAME, type: 'PROGRAMME', retentionDays: 365, dpoContact: 'David Kamau (dpo@partner-network.org)', supportPhone: '0700 000 000' },
       });
 
       const facilityIds = new Map<string, string>();
@@ -164,6 +167,8 @@ async function main() {
             status: rulePackStatus(rp.status), ackSlaHours: rp.ackSlaHours, contactSlaHours: rp.contactSlaHours,
             evalTargetDays: rp.evalTargetDays, clinicalOwnerId: userIds.get(ownerName) ?? null,
             redFlagRule: rp.redFlagRule, closureCriteria: rp.closureCriteria, effectiveFrom: parseEat('2026-11-01'),
+            // The structured form of the red-flag wording (cancer: 24h, NCD: 4h; the others describe routing, not a timer).
+            redFlagPolicy: { unacknowledgedHours: RED_FLAG_HOURS[rp.id] ?? null },
           },
         });
         rulePackByPathway.set(RULE_PACK_PATHWAY[rp.id], {
@@ -186,6 +191,7 @@ async function main() {
       // Cases (+ patients, consent, milestones)
       let maxRef = 0;
       const caseIds = new Map<string, string>(); // demo id → db id
+      const patientIdByCase = new Map<string, string>(); // demo id → patient id
       for (const c of raw.cases) {
         const issuedAt = parseEat(c.milestones.referralIssuedAt);
         const pack = rulePackByPathway.get(pathway(c.pathway))!;
@@ -228,6 +234,7 @@ async function main() {
           },
         });
         caseIds.set(c.id, row.id);
+        patientIdByCase.set(c.id, patient.id);
         maxRef = Math.max(maxRef, Number(c.id.split('-')[2]));
 
         for (const [key, type] of MILESTONES) {
@@ -240,9 +247,10 @@ async function main() {
       for (const m of raw.commsLog) {
         await tx.commsLog.create({
           data: {
-            orgId: org.id, caseId: caseIds.get(m.caseId)!, channel: channel(m.channel),
+            orgId: org.id, caseId: caseIds.get(m.caseId)!, patientId: patientIdByCase.get(m.caseId)!, channel: channel(m.channel),
             templateId: templateIds.get(m.templateName) ?? null, templateName: m.templateName,
-            status: delivery(m.deliveryStatus), sentAt: parseEat(m.timestamp),
+            status: delivery(m.deliveryStatus), requestedAt: parseEat(m.timestamp),
+            sentAt: ['DELIVERED', 'READ'].includes(delivery(m.deliveryStatus)) ? parseEat(m.timestamp) : null,
           },
         });
       }
@@ -268,7 +276,8 @@ async function main() {
   ]);
   console.log(`Seeded org ${result.orgId}`);
   console.log(`  users=${counts[0]} facilities=${counts[1]} cases=${counts[2]} patients=${counts[3]} consent=${counts[4]} milestones=${counts[5]} comms=${counts[6]} audit=${counts[7]}`);
-  console.log(`  Demo login: ${slug('Miriam Wanjiku')}@${EMAIL_DOMAIN}  /  ${DEMO_PASSWORD}`);
+  console.log(`  Demo login (coordinator): ${slug('Miriam Wanjiku')}@${EMAIL_DOMAIN}  /  ${DEMO_PASSWORD}`);
+  console.log(`  Demo login (manager, can invite/edit settings): ${slug('Joyce Wairimu')}@${EMAIL_DOMAIN}  /  same password`);
 }
 
 main()

@@ -1,0 +1,57 @@
+# Render Blueprint: one web service (API + built frontend, from the Dockerfile) and a managed Postgres.
+# Step-by-step setup and the post-deploy checks: docs/render-deployment.md
+#
+# Values that are NOT in this file on purpose (Render asks for them when you create the Blueprint, or you set them in the
+# dashboard): APP_URL, FIELD_ENCRYPTION_KEY, MESSAGING_PROVIDER. Secrets never belong in the repository.
+
+databases:
+  - name: pathora-db
+    plan: basic-256mb          # size up for real traffic; check current plans and prices
+    postgresMajorVersion: "16" # matches docker-compose and CI
+    region: frankfurt          # DECISION: must equal the web service region (private network). Render has no African
+                               # region; hosting Kenyan patient data abroad is a data-protection decision (docs/dpia.md).
+
+services:
+  - type: web
+    name: pathora
+    runtime: docker            # builds the Dockerfile's last stage (the app image)
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    region: frankfurt          # DECISION: same as the database
+    plan: starter              # must be an always-on paid plan: the SLA monitor, message sender and retention job run
+                               # inside this process, and a free service that sleeps when idle would silently stop them
+    numInstances: 1            # keep at 1 while exports use local disk (see the disk note below)
+    healthCheckPath: /readyz   # 200 only when this instance can reach the database; gates zero-downtime deploys
+    autoDeployTrigger: checksPass  # deploy only after CI passes (off = manual deploys only)
+    # Runs once per release after the build and before the new instance starts. If it fails, the deploy is aborted and
+    # the previous version keeps serving.
+    preDeployCommand: npx prisma migrate deploy
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pathora-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true    # random 256-bit value
+      - key: COOKIE_SECRET
+        generateValue: true
+      - key: FIELD_ENCRYPTION_KEY
+        sync: false            # enter a key you generated yourself AND back up outside Render (see the guide):
+                               # it encrypts every patient name and phone number, and losing it loses them for good
+      - key: APP_URL
+        sync: false            # the public https address people will use, e.g. https://pathora.onrender.com or your domain
+      - key: MESSAGING_PROVIDER
+        sync: false            # `africastalking` to send real messages; `mock` sends NOTHING (it only pretends)
+      - key: TRUST_PROXY
+        value: "1"             # proxies in front of the app. VERIFY after deploy: docs/render-deployment.md
+      - key: LOG_LEVEL
+        value: info
+
+    # Exports (CSV files) are written to local disk, which Render wipes on every deploy. If you need generated exports to
+    # survive a deploy, uncomment this and set EXPORT_DIR to the mount path. A disk needs a paid plan, pins the service to a
+    # single instance, and turns off zero-downtime deploys. Exports are temporary (deleted after 7 days) so this is optional.
+    # disk:
+    #   name: pathora-exports
+    #   mountPath: /data
+    #   sizeGB: 1
+    # (and add to envVars:  - key: EXPORT_DIR / value: /data/exports)

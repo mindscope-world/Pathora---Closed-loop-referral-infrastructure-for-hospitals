@@ -1,17 +1,32 @@
 import { createApp } from './app';
 import { env } from './config/env';
 import { logger } from './lib/logger';
+import { startExportWorker } from './jobs/exportWorker';
+import { startSlaMonitor } from './jobs/slaMonitor';
+import { startMessageWorker } from './jobs/messageWorker';
+import { startRetentionPurge } from './jobs/retentionPurge';
+import { startReportScheduler } from './jobs/reportScheduler';
 
 const app = createApp();
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Pathora API listening');
 });
+const stopExportWorker = startExportWorker();
+const stopSlaMonitor = startSlaMonitor();
+const stopMessageWorker = startMessageWorker();
+const stopReportScheduler = startReportScheduler();
+const stopRetentionPurge = startRetentionPurge();
 
 let shuttingDown = false;
 function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info({ signal }, 'Shutting down');
+  stopExportWorker();
+  stopSlaMonitor();
+  stopMessageWorker();
+  stopReportScheduler();
+  stopRetentionPurge();
   server.close((err) => {
     if (err) {
       logger.error({ err }, 'Error during shutdown');

@@ -40,7 +40,7 @@ const MILESTONE_KEYS: Record<string, keyof CaseMilestonesDto> = {
   OUTCOME_DOCUMENTED: 'outcomeDocumentedAt',
 };
 
-export const hasMilestone = (row: Pick<CaseRow, 'milestones'>, type: string) => row.milestones.some((m) => m.type === type);
+export const hasMilestone = (row: { milestones: Array<{ type: string }> }, type: string) => row.milestones.some((m) => m.type === type);
 
 export function toCaseDto(row: CaseRow, now: Date): CaseDto {
   const milestones: CaseMilestonesDto = {};
@@ -68,6 +68,7 @@ export function toCaseDto(row: CaseRow, now: Date): CaseDto {
     notes: row.notes,
     closureReason: row.closureReason,
     outcomeSource: row.outcomeSource,
+    hasPhone: row.patient.phoneEnc !== null,
     milestones,
     version: row.version,
   };

@@ -343,6 +343,16 @@ Each phase ends in something demoable and testable. Phases 0–4 give a usable c
 
 **Exit:** exports reproduce the demo CSVs, and tampering with a row makes `/audit/verify` fail.
 
+> **Phase 4 as built** (differences from the steps above, and why)
+> - **Queue:** generation runs from a small database-backed queue (the `ExportJob` table, claimed with `FOR UPDATE SKIP LOCKED`, with crash recovery and retention expiry) rather than pg-boss. It needs no new infrastructure, is multi-instance safe, and is directly testable. pg-boss is still installed for Phase 6 if the SLA monitor wants it.
+> - **Storage:** a `FileStore` interface with a local-disk implementation (`EXPORT_DIR`, owner-only files, atomic publish). Production should add an S3/GCS implementation behind the same interface.
+> - **Download links:** HMAC-signed, 5 minutes, bound to one export and organisation, re-checked against the requester's *current* permissions when used. They are served by the API itself, and the token is redacted from request logs.
+> - **Audit trail:** `EXPORT_REQUESTED`, `EXPORT_GENERATED`, `EXPORT_FAILED` and `EXPORT_DOWNLOADED` are all recorded. Audit exports include every hashed field plus each event's hash, so a recipient can recompute the chain from the file alone (a test does exactly this). Each export records its SHA-256 and, for audit exports, the chain tip it ends at.
+> - **`GET /audit/verify`** also returns the chain's tip hash: record it outside the database and any later change to earlier history becomes provable.
+> - **CSV safety:** text cells that would start with `= + - @` are neutralised (spreadsheet formula injection); numbers are written as numbers. The referral export contains **no patient names**, only programme codes.
+> - **Guard:** a test fails the build if any code other than `audit/append.ts` writes `AuditEvent` rows.
+> - **UI:** the Audit screen now reads the server's trail (search, load-more, integrity check, recent exports). The local demo audit log in the dashboard has been removed. Actions on still-mock features (comms sends, rule-pack edits, team changes) no longer appear in it, because they do not exist on the server yet.
+
 ### Phase 5: Facilities, team and organisation settings (1 day)
 1. Facilities: `GET/POST/PATCH /facilities`. `avgAckHours` is computed from milestones (a view or a nightly rollup).
 2. Team: `GET /users`, `POST /users/invite` (emails a signed invite link and sets the password on acceptance), `PATCH /users/:id` (deactivate). Deactivation revokes refresh tokens. Do not hard-delete, because audit rows reference users.
@@ -350,6 +360,16 @@ Each phase ends in something demoable and testable. Phases 0–4 give a usable c
 4. Receiving-facility API keys are a Phase 8 item.
 
 **Exit:** a manager can invite a facility focal, who then logs in and sees only their facility's referrals.
+
+> **Phase 5 as built** (differences from the steps above, and why)
+> - **Invitations, not "add user":** a manager invites by email + role; the invitee follows a single-use link (7 days, only a hash is stored, token travels in a request *body* so it never reaches access logs) and chooses their own password. Re-inviting replaces the earlier link. Accepting is atomic, so simultaneous attempts create exactly one account.
+> - **Email is optional:** with `SMTP_URL` set an email (plain text only) is sent; without it, the inviter is shown the link once and shares it themselves. The SMTP path is tested against nodemailer's JSON transport, not a real mail server.
+> - **Safeguards:** you cannot suspend or re-role yourself; the last active Programme Manager cannot be removed (enforced with a row lock, tested with simultaneous mutual demotion); deactivation ends every session immediately; role changes apply on the next request.
+> - **Account-existence privacy:** an invitation to an address that already has an account (in any organisation) fails with one generic message. It still distinguishes "cannot invite" from success, which is inherent to a one-email-one-account model.
+> - **Organisation settings** are validated server-side (retention 30-3650 days) and every change is audited with before → after. **Facilities** can be added and edited (names unique per organisation; renames keep existing referrals attached). Facilities are not deletable.
+> - **Free-text names reject control characters** (header/CSV injection), across signup, team, facility and organisation inputs.
+> - **Seed:** the demo organisation now includes a Programme Manager (`joyce.wairimu@demo.pathora.test`); before, nobody in it could manage anything.
+> - **Tests:** argon2 uses a minimal cost under `NODE_ENV=test` only (production keeps the defaults), which removed hashing as the dominant and flaky part of the suite.
 
 ### Phase 6: Rule packs and the SLA monitor (2 days)
 1. `GET /rule-packs`, `PATCH /rule-packs/:id` (Clinical Lead only). Editing creates a **new version row** (`effectiveFrom = now`). Existing cases keep their pinned pack. Writes a `RULE_PACK_UPDATED` audit event.
@@ -362,6 +382,16 @@ Each phase ends in something demoable and testable. Phases 0–4 give a usable c
 5. `GET /escalations` returns cases where status is Overdue SLA, stage is Escalated, `redFlag` is set, or SLA remaining is 12 hours or less (matching the `EscalationsView` filter).
 
 **Exit:** a case left unacknowledged past its SLA automatically appears in the escalation queue with an audit entry. No manual trigger is needed.
+
+> **Phase 6 as built** (differences from the steps above, and why)
+> - **Pack ids are the stable key** (`RP-CANCER`), not a row id, so the URL survives new versions. `PATCH` publishes a new version row; earlier versions are never edited, every open referral stays pinned to the version it was created under, and the audit entry says so. `GET /rule-packs/:key/versions` is the approval history (who approved which version).
+> - **Bounds are enforced on the server and checked together:** acknowledgment and contact 1-168h, evaluation 1-90 days, red-flag timer 1-168h; contact <= acknowledgment, evaluation target after the acknowledgment deadline, red-flag timer within the evaluation target. Activating a pathway requires a named clinical owner (a Partner Clinical Lead).
+> - **Red-flag rules are structured** (`redFlagPolicy.unacknowledgedHours`), enforced by the monitor; the original wording stays for display. Cancer = 24h, NCD = 4h; the male-health and MCH wording describes routing, not a timer, so they have none.
+> - **The monitor** records each missed deadline once (`SlaBreach`, unique per case + kind + deadline: safe under concurrent runs and multiple instances) and audits it as `SLA_BREACH_DETECTED`. Red-flag breaches additionally **escalate the referral** (`SLA_ESCALATION_TRIGGERED`). It never overrides a person: once someone clears an escalation the same deadline is not escalated again. A resolved barrier gives a new deadline, which can breach again.
+> - **Notifications:** in-app (bell + `GET /notifications`), plus plain-text email when SMTP is configured. Text carries the referral number and facility only, never patient details. Recipients: the case owner, and the pack's clinical owner (or every active clinical lead if none is named).
+> - **The synthetic gate test is real.** The old screen printed four hard-coded "success" lines whatever the rules were, including a "failed-contact fallback" that does not exist yet. The new one runs the actual monitor against fixture referrals inside a transaction that is always rolled back, reports PASSED / FAILED / SKIPPED per check using the pack's own numbers, then verifies nothing was left behind. The only trace is one `RULE_PACK_GATE_TESTED` audit entry. The failed-contact fallback check returns with Phase 7.
+> - **`GET /escalations`** implements the dashboard's attention rule server-side (a test proves both agree); the screen itself still filters the case list it already holds.
+> - **Not done:** applying a changed SLA to referrals that are already open (deliberately: they keep their pinned rules).
 
 ### Phase 7: Patient communications and consent (2.5 days)
 1. Templates: CRUD with an approval workflow (`reviewedBy`, `approvedAt`). Only approved templates can be sent. Validate placeholders. Lint that bodies contain no clinical terms.
@@ -376,6 +406,17 @@ Each phase ends in something demoable and testable. Phases 0–4 give a usable c
 8. **Frontend:** `CommsConsentView` calls the real endpoints. The delivery log polls or uses SSE.
 
 **Exit:** an opted-out patient cannot be messaged by any path. Delivery receipts update the log.
+
+> **Phase 7 as built** (differences from the steps above, and why)
+> - **Consent is enforced twice.** At request time (`POST /cases/:id/messages`) per channel (SMS consent does not allow WhatsApp; an opt-out blocks everything), and again at the moment of sending, because a patient can reply STOP between queueing and sending. A refusal is recorded in the delivery log, audited, and handed to a person (a notification to the case owner); it never just disappears. The old screen recorded "Delivered" for everything and only looked at the case-level opt-out.
+> - **Nothing is sent from the request.** Messages are queued; a worker (database-backed queue, `FOR UPDATE SKIP LOCKED`, safe across instances) delivers them. Quiet hours (21:00-07:00 EAT), a limit of 3 automated messages per patient per 24h (race-safe), and retries with backoff (1 min, 5 min, 30 min, 2 h, then give up) all live there. A retry is never scheduled into quiet hours.
+> - **A missed message is better than a duplicate.** If a worker dies mid-send we cannot know whether the provider accepted the message, so it is marked failed and a person is asked to check; it is not retried.
+> - **Templates have an approval workflow:** staff draft, the Partner Clinical Lead approves, only approved templates can be sent, and editing approved wording withdraws the approval. Wording is linted (no clinical terms in English or Kiswahili, no links, only `{facility}` and `{phone}`), and re-checked at approval and again at send time. The lint flagged the demo template TPL-01 ("...from the screening team"): "screening" reveals a health screening to anyone reading a lock screen, so the demo wording was changed. Remove "screening"/"screened" from `CLINICAL_TERMS` if your clinical advisers disagree.
+> - **Patient phone numbers** did not exist anywhere. They are captured at intake (form, CSV column 8, or `PUT /cases/:id/contact`), normalised to E.164, stored encrypted, never returned by the API (only `hasPhone`) and never written to the audit trail or logs. A keyed hash (deliberately not organisation-scoped) lets a reply find the patient.
+> - **Webhooks** (`/api/webhooks/messaging/delivery|inbound`) are authenticated by a shared secret on the URL (`MESSAGING_WEBHOOK_SECRET`, redacted from logs). Receipts only move a message forward (a late "Sent" cannot undo "Delivered"). Patient replies are understood by keyword (STOP/ACHA, START/ANZA, 1/NDIYO) and **the reply text is never stored**; STOP applies to every programme that has been messaging that number.
+> - **Provider:** an Africa's Talking SMS adapter, written from the provider's documented API and tested against recorded-style responses only. It has never talked to the live service: verify against the AT sandbox (`AT_BASE_URL`) before go-live. WhatsApp is not wired to any provider yet (such a request is handed to a person). A mock provider is used in development and tests and simulates delivery receipts in development.
+> - **Synthetic gate test** gained the two checks Phase 6 promised: a patient who opted out is never messaged, and an undeliverable message reaches a person.
+> - **Not done:** inbound WhatsApp, voice calls, per-organisation quiet hours, and deleting/ageing out old delivery logs (Phase 11).
 
 ### Phase 8: Reporting and dashboard metrics (1.5 days)
 Move the client-side aggregations to the server so they are accurate over paginated data.
@@ -392,9 +433,48 @@ Move the client-side aggregations to the server so they are accurate over pagina
 
 **Exit:** the Overview screen renders from `/metrics/overview` only.
 
+#### Phase 8 as built
+
+- **Server-side metrics.** `GET /api/metrics/overview` (funnel, status counts, the four summary-card figures, per-pathway
+  table, median time to acknowledge / to verified close with sample sizes) and `GET /api/metrics/upcoming` (count plus the
+  soonest 10 referrals). The arithmetic is one pure module (`server/modules/metrics/compute.ts`) that uses `deriveStatus`,
+  so the Overview, the exports and the SLA monitor cannot disagree. Funnel steps live in `shared/types.ts` (`FUNNEL_STEPS`).
+  Both endpoints exclude simulation referrals, are scoped like the case list (a facility focal sees only their facility),
+  and carry no patient data. "Today" is a calendar day in East Africa Time, so "due this week" is day 0 to day +7 EAT.
+- **Parity is tested, not assumed.** `metrics.test.ts` keeps the formulas the screen used to run in the browser as a
+  reference and asserts the server returns the same numbers on a mixed dataset, including the EAT-midnight and day +7/+8
+  boundaries. One pre-existing quirk is preserved on purpose: funnel step 3 ("Acknowledged") counts by stage, so an
+  escalated referral the facility had already acknowledged is not in it.
+- **Frontend.** `useMetrics` reloads whenever the workspace's case list changes (every action and its 60 s refresh);
+  `OverviewView`/`DashboardSummary` render the server figures, keep the last good numbers on a failed refresh, and show
+  the two medians. The priority queue still derives from the loaded cases (it needs rows, not counts).
+- **Reports.** New export type `GOVERNANCE_CSV` (programme performance by pathway and facility, with subtotals and a
+  programme total; aggregates only, no patient identifiers) and `ReportSchedule` (weekly = Mondays, monthly = the 1st,
+  06:00 EAT). `reportScheduler` queues an ordinary `ExportJob` in the owner's name for the period that just ended, so the
+  existing worker, retention, signed download and audit apply. Claimed by compare-and-set on `nextRunAt` (safe on several
+  servers); after downtime it produces one catch-up report, not a backlog; it pauses (and audits) a schedule whose owner
+  lost export access. `/api/report-schedules` needs `exports.create`; capped at 10 per organisation; the audit-trail
+  export cannot be scheduled (also enforced by a DB CHECK).
+- **Deliberately not built: the materialised view.** Metrics are computed per request over a narrow select (no patient
+  data) using the existing `(orgId, stage|facilityId|slaDueAt|pathway)` indexes. That is comfortable for pilot volumes
+  (the workspace already loads every case). If an organisation reaches tens of thousands of referrals, add a rollup table
+  refreshed by the SLA monitor behind the same endpoints; nothing else changes.
+
 ### Phase 9: Public site, leads and the AI layer (1 day)
 1. `POST /leads` from `DiscoveryModal`. Zod validation (matching the current regex check), honeypot field and strict rate limit, and no auth. Email notification to the team.
 2. **`@google/genai` (optional, scoped):** the dependency and `MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API` suggest AI was planned. Keep the server-side key and **never send identifiable patient data**. Reasonable low-risk uses: drafting Kiswahili/English template variants for clinical review, and summarising de-identified programme metrics. Anything touching clinical decisions stays out of scope, because the product pitch is *deterministic* rules approved by a clinical lead.
+
+#### Phase 9 as built
+
+- **`POST /api/leads`** (public, no auth) behind `DiscoveryModal`. Validation matches the form's email check plus length
+  caps and no control characters (so names cannot inject mail headers); the email is lower-cased. A filled honeypot field
+  or a repeat of the same email + pathway within 24 h is dropped silently and still returns `202 {ok:true}`, so bots learn
+  nothing and double-clicks make no duplicates. Strict per-IP limit (5/hour). The lead is saved first; the team email
+  (`LEADS_NOTIFY_EMAIL`, needs `SMTP_URL`) is best effort and never fails the request.
+- **Frontend.** The modal posts to the server, shows a sending state, maps server errors (validation, rate limit, network)
+  to messages, and its confirmation text no longer claims a brief was already prepared. Hidden honeypot input.
+- **Not built: the AI layer.** It was marked optional, needs a live key to verify, and `@google/genai` is still an unused
+  dependency. If added: server-side only, de-identified inputs only, drafts for clinical review, never rules or decisions.
 
 ### Phase 10: Interoperability (Phase 2 product scope, 3+ days)
 The landing copy promises "secure CSV now, partner EMR APIs and FHIR later".
@@ -402,11 +482,75 @@ The landing copy promises "secure CSV now, partner EMR APIs and FHIR later".
 2. A FHIR R4 `ServiceRequest` (outbound referral) and `Task` (status return) mapping layer. Keep it behind an adapter so the core domain stays FHIR-agnostic.
 3. SFTP or portal drop for the `Portal + CSV` facilities.
 
+#### Phase 10 as built
+
+- **Facility API keys.** `FacilityApiKey` (per facility, scoped `referrals:read` / `referrals:identify` / `status:write`,
+  optional expiry, revocable, max 5 active per facility). Managed by the programme manager at
+  `/api/facilities/:id/api-keys` (permission `integrations.manage`). The secret and a separate HMAC **signing secret** are
+  shown once; only a SHA-256 of the secret and an encrypted signing secret are stored, and the audit trail records the key's
+  name and scopes, never a secret. One identical `401` for unknown / wrong / revoked / expired keys.
+- **Signed callbacks.** `POST` calls need `X-Pathora-Signature: t=…,v1=HMAC-SHA256(secret, "<t>." + raw body)` with a 5-minute
+  window (the timestamp is part of what is signed). The integration routes keep the body raw so the exact bytes are verified.
+- **Status return** (`/api/integrations/v1`): `referrals/:ref/acknowledge|attendance|outcome`, FHIR `Task`, and a CSV
+  upload. They call the **same case actions as the dashboard** (state machine, optimistic lock, audit, SLA reset) as the
+  facility's own identity: scoped to that facility (another facility's or organisation's referral is a 404), recorded as
+  "Facility system (API)", with no person attributed. Idempotent (a repeat returns `already_recorded`), safe under races, and
+  out-of-order steps are refused rather than back-filled.
+- **FHIR R4 adapter** (`server/integrations/fhir`): `ServiceRequest` (outbound referral), `Task` (status), searchset
+  `Bundle`, `CapabilityStatement`, `OperationOutcome` errors. The core domain knows nothing about FHIR. Patients are
+  identified by programme code only unless the key has `referrals:identify`; each release of names is audited.
+- **File route:** `GET /referrals.csv` and `POST /status-returns.csv` (up to 500 rows, per-row results) for Portal + CSV
+  facilities. Integrator guide: `docs/facility-integration.md`.
+- **Limits:** 300 requests/minute per key; failed authentication is throttled per IP (successes never count toward it).
+- **Deliberately not built:** a hosted **SFTP** drop (needs infrastructure: a managed SFTP gateway writing to a bucket plus a
+  worker that feeds the CSV endpoint's logic), **outbound push** of referrals to facility endpoints (facilities pull today;
+  a push needs retries, dead-lettering and per-facility endpoint config), and a **UI** for key management (API only).
+
 ### Phase 11: Hardening, observability, deployment (2 days)
 1. **Security:** OWASP review, secrets in a manager, CSP headers, dependency audit, backup and restore drill, and a pen-test checklist.
 2. **Data protection:** retention purge job driven by `retentionDays`, a data subject access and erasure procedure (erasure must preserve the audit chain by redacting payloads, not rows), and a DPIA document.
 3. **Observability:** pino JSON logs without PII, OpenTelemetry traces, and metrics for queue depth, SLA job lag and send failures.
 4. **Deployment:** Dockerfile (multi-stage), the server serves the built `dist/` in production (Express static plus SPA fallback), and CI running lint, tests, migration check and build. The `APP_URL` placeholder indicates a Cloud Run target. Use a managed Postgres with PITR and a Kenyan or compliant region.
+
+#### Phase 11 as built
+
+- **Deployment.** The server serves the built frontend (`STATIC_DIR`, default `dist` in production) with an SPA fallback that
+  never swallows the API, missing assets, dot-paths or non-GET requests; fingerprinted assets are cached for a year,
+  `index.html` never. Multi-stage `Dockerfile` with two targets: `runtime` (production dependencies only, non-root user,
+  healthcheck) and `migrate` (`prisma migrate deploy`, run as a release step first). `.github/workflows/ci.yml` type-checks,
+  applies migrations to a fresh database and fails if `schema.prisma` drifts from them, runs the tests, builds both
+  targets, audits dependencies, and smoke-tests that the image refuses placeholder secrets. `/readyz` checks the database.
+- **Security.** Strict CSP (script-src `'self'` only, no eval, `frame-ancestors 'none'`), no-referrer, HSTS; production refuses to start
+  on placeholder or reused secrets or a non-https `APP_URL`; any variable can come from a secret-manager mount via `NAME_FILE`.
+  `docs/security-checklist.md`: OWASP Top 10 mapped to real controls, known gaps stated plainly, and a pen-test checklist.
+- **Data protection.** `Patient.erasedAt` and one erasure routine used by both the DPO tools and an hourly **retention job**
+  (`retentionDays` per organisation; erases a person once EVERY referral has been closed longer than the window). Erasure removes
+  name, phone and its hash, search tokens, label, referral notes and closure narrative, and sent-message text; it keeps the
+  pseudonymous code, referral rows and times (statistics), consent history and the **whole audit trail**, which was designed to
+  hold no names or numbers and so never has to be altered: the hash chain stays valid. `GET/POST /api/privacy/patients/:code/export|erasure`
+  (DPO only, audited, erasure refused while a referral is open, idempotent and race-safe). The job also clears stale login-throttle and
+  replay-key rows. `docs/dpia.md` is a DRAFT with the decisions only people can make marked.
+- **Observability.** Logs redact credentials and patient fields and scrub phone numbers and emails out of error text. `GET /metrics`
+  (Prometheus format, bearer `METRICS_TOKEN`, absent when unset): HTTP counts and latency by route TEMPLATE (identifiers are normalised
+  out of labels), per-job runs, errors and lag-since-last-success (SLA monitor, message worker, exports, report scheduler, retention),
+  and queue depth, send lag, failed and human-routed messages, SLA breaches, late schedules. No organisation, person or referral appears.
+- **Backups.** `scripts/backup-restore-drill.sh` dumps, restores into a scratch database, compares row counts, re-verifies every
+  organisation's audit chain in the RESTORED copy (`scripts/verify-audit-chain.ts`, timezone-independent, exit 1 on a break), and cleans up.
+  `docs/operations.md` covers deploy, configuration, alerts, the drill, data-subject requests and the post-restore re-erasure step.
+- **Not built:** OpenTelemetry **traces** (logs and metrics only; needs a collector to verify), MFA, a WAF or CAPTCHA, a secret-manager
+  integration beyond `*_FILE`, object-storage exports (local disk behind a `FileStore` interface), `FIELD_ENCRYPTION_KEY` rotation tooling,
+  an actual penetration test, and the hosting decisions (region, encryption at rest, PITR, backup retention) that the DPIA marks for people.
+
+#### Render deployment (after Phase 11)
+
+- **`render.yaml`** Blueprint (validated against Render's published schema): one Docker web service plus managed Postgres, health check on
+  `/readyz`, `preDeployCommand: npx prisma migrate deploy`, generated JWT/cookie secrets, and the three values a person must choose
+  (`FIELD_ENCRYPTION_KEY`, `APP_URL`, `MESSAGING_PROVIDER`) left out of the repository on purpose. A test checks the blueprint against the
+  app's own environment schema and production guard.
+- **Migrations:** the runtime image now contains the pinned Prisma CLI, config and migrations, so it can run `prisma migrate deploy` itself;
+  `docker-entrypoint.sh` adds an opt-in `MIGRATE_ON_START=true` (exits without starting the app if migrations fail).
+- **`TRUST_PROXY`** is configurable (hop count or proxy list; `true` refused), with an operator-only `GET /diagnostics/client-ip` to verify it.
+- `docs/render-deployment.md`: decisions, setup and post-deploy checks. Region, plan and backups remain decisions for people.
 
 ---
 

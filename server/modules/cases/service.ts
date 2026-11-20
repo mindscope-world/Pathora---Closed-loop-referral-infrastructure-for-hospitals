@@ -1,17 +1,19 @@
-import { ROLE_LABELS, PATHWAY_LABELS, type CaseDetailDto, type CaseDto, type CaseListResponse, type FacilityDto, type AssigneeDto, type PathwayId } from '../../../shared/types';
+import { ROLE_LABELS, PATHWAY_LABELS, type CaseDetailDto, type CaseDto, type CaseListResponse, type AssigneeDto, type PathwayId } from '../../../shared/types';
 import { can } from '../../../shared/permissions';
-import { prisma } from '../../db/client';
 import { forOrg, type TenantDb } from '../../db/tenant';
 import type { MilestoneType, Prisma } from '../../db/generated/client';
 import { aad, encryptField } from '../../lib/crypto';
 import { HttpError } from '../../lib/errors';
 import { nextPatientCode, nextRefNumber, reserveRefNumbers } from '../../lib/ids';
+import { phoneHash } from '../../lib/phone';
 import { nameTokens } from '../../lib/searchIndex';
 import { caseScope } from '../../middleware/tenant';
+import { nextConsentTime, recordOptOut, recordRestore, restorableChannels } from '../consent/consent';
 import type { AuthContext } from '../../types';
 import { appendAudit, appendAuditBatch } from '../audit/append';
+import { toAuditEventDto } from '../audit/dto';
 import { caseInclude, hasMilestone, toCaseDto, type CaseRow } from './dto';
-import { buildCaseWhere, decodeCursor, encodeCursor, type ListQuery } from './queries';
+import { buildCaseWhere, decodeCursor, encodeCursor, escalationWhere, type ListQuery } from './queries';
 import { ackDeadline, barrierDeadline, evaluationDeadline } from './sla';
 import { transition, type CaseEvent } from './stateMachine';
 
@@ -25,7 +27,8 @@ const ASSIGNEE_ROLES = ['PROGRAMME_MANAGER', 'PROGRAMME_COORDINATOR'] as const;
 
 function audit(tx: Tx, auth: AuthContext, action: string, resourceId: string, detail: string, resourceType = 'ReferralCase') {
   return appendAudit(asAuditTx(tx), {
-    orgId: auth.orgId, actorId: auth.userId, actorLabel: auth.name, actorRole: ROLE_LABELS[auth.role],
+    orgId: auth.orgId, actorId: auth.userId || null, actorLabel: auth.name,
+    actorRole: auth.via === 'integration' ? 'Facility system (API)' : ROLE_LABELS[auth.role],
     action, resourceType, resourceId, detail,
   });
 }
@@ -37,7 +40,7 @@ export function appendNote(notes: string, label: string, text: string): string {
 }
 
 /** Loads a case the caller may see, or throws 404 (also for another facility's case: existence is not leaked). */
-async function loadCase(db: TenantDb | Tx, auth: AuthContext, ref: string): Promise<CaseRow> {
+export async function loadCase(db: TenantDb | Tx, auth: AuthContext, ref: string): Promise<CaseRow> {
   const row = await db.referralCase.findFirst({
     where: { AND: [caseScope(auth), { refNumber: ref }] },
     include: caseInclude,
@@ -69,7 +72,7 @@ async function applyUpdate(tx: Tx, row: CaseRow, expectedVersion: number | undef
 }
 
 const addMilestone = (tx: Tx, caseId: string, type: MilestoneType, userId: string, at: Date) =>
-  tx.caseMilestone.create({ data: { caseId, type, occurredAt: at, recordedBy: userId } });
+  tx.caseMilestone.create({ data: { caseId, type, occurredAt: at, recordedBy: userId || null } }); // '' = a facility system, not a person
 
 async function reload(tx: Tx | TenantDb, auth: AuthContext, ref: string, now: Date): Promise<CaseDto> {
   return toCaseDto(await loadCase(tx, auth, ref), now);
@@ -115,8 +118,25 @@ export async function listCases(auth: AuthContext, q: ListQuery): Promise<CaseLi
   };
 }
 
+/** The attention queue, most urgent first. */
+export async function listEscalations(auth: AuthContext): Promise<CaseDto[]> {
+  const now = new Date();
+  const rows = (await forOrg(auth.orgId).referralCase.findMany({
+    where: { AND: [caseScope(auth), { isSynthetic: false }, escalationWhere(now)] },
+    include: caseInclude,
+    orderBy: [{ slaDueAt: 'asc' }, { id: 'asc' }],
+    take: 200,
+  })) as CaseRow[];
+  return rows.map((r) => toCaseDto(r, now));
+}
+
 export async function searchCases(auth: AuthContext, q: string, limit = 8): Promise<CaseDto[]> {
   return (await listCases(auth, { q, limit } as ListQuery)).cases;
+}
+
+/** One case as the list shows it (no audit entry; used to return the result of an action). */
+export async function getCaseSummary(auth: AuthContext, ref: string): Promise<CaseDto> {
+  return toCaseDto(await loadCase(forOrg(auth.orgId), auth, ref), new Date());
 }
 
 /** Full case view. Opening a case exposes identifiers, so it is audited. */
@@ -131,44 +151,17 @@ export async function getCaseDetail(auth: AuthContext, ref: string): Promise<Cas
       ? await tx.auditEvent.findMany({ where: { resourceId: ref }, orderBy: { id: 'desc' }, take: 200 })
       : [];
     const comms = can(auth.role, 'comms.read')
-      ? await tx.commsLog.findMany({ where: { caseId: row.id }, orderBy: { sentAt: 'desc' }, take: 200 })
+      ? await tx.commsLog.findMany({ where: { caseId: row.id }, orderBy: { requestedAt: 'desc' }, take: 200 })
       : [];
 
     return {
       ...toCaseDto(row, now),
-      timeline: timeline.map((e) => ({
-        id: String(e.id), at: e.at.toISOString(), actor: e.actorLabel, role: e.actorRole, action: e.action, detail: e.detail,
-      })),
+      timeline: timeline.map(toAuditEventDto),
       comms: comms.map((c) => ({
-        id: c.id, channel: c.channel, templateName: c.templateName, status: c.status, sentAt: c.sentAt.toISOString(),
+        id: c.id, channel: c.channel, templateName: c.templateName, status: c.status, sentAt: c.requestedAt.toISOString(),
       })),
     };
   });
-}
-
-export async function listFacilities(auth: AuthContext): Promise<FacilityDto[]> {
-  const db = forOrg(auth.orgId);
-  const facilities = await db.facility.findMany({
-    where: auth.role === 'FACILITY_FOCAL' ? { id: auth.facilityId ?? '__none__' } : undefined,
-    orderBy: { name: 'asc' },
-    include: { users: { where: { role: 'FACILITY_FOCAL', active: true }, select: { name: true }, orderBy: { createdAt: 'asc' }, take: 1 } },
-  });
-
-  // Mean hours from referral issued → facility acknowledged, per facility.
-  const avgs = await prisma.$queryRaw<{ facilityId: string; avg: number }[]>`
-    SELECT c."facilityId", AVG(EXTRACT(EPOCH FROM (a."occurredAt" - i."occurredAt")) / 3600.0)::float AS avg
-    FROM "ReferralCase" c
-    JOIN "CaseMilestone" i ON i."caseId" = c.id AND i.type = 'REFERRAL_ISSUED'
-    JOIN "CaseMilestone" a ON a."caseId" = c.id AND a.type = 'FACILITY_ACKNOWLEDGED'
-    WHERE c."orgId" = ${auth.orgId} AND NOT c."isSynthetic"
-    GROUP BY c."facilityId"`;
-  const avgByFacility = new Map(avgs.map((a) => [a.facilityId, Math.round(a.avg * 10) / 10]));
-
-  return facilities.map((f) => ({
-    id: f.id, name: f.name, type: f.type, city: f.city, interopMethod: f.interopMethod,
-    focalPerson: f.users[0]?.name ?? null,
-    avgAckHours: avgByFacility.get(f.id) ?? null,
-  }));
 }
 
 export async function listAssignees(auth: AuthContext): Promise<AssigneeDto[]> {
@@ -193,6 +186,8 @@ export interface NewCaseInput {
   redFlag: boolean;
   consentSms: boolean;
   consentBasis?: string;
+  /** E.164. Stored (encrypted) only when the patient record is CREATED; change it later with setContact. */
+  patientPhone?: string;
   notes?: string;
 }
 
@@ -216,6 +211,10 @@ async function resolveRefs(tx: Tx, auth: AuthContext, input: Pick<NewCaseInput, 
   }
   return { facilityName: facility.name, coordinatorOk: true, pack };
 }
+
+/** The encrypted number and its lookup hash, or nothing. */
+const phoneColumns = (orgId: string, e164?: string) =>
+  e164 ? { phoneEnc: encryptField(e164, aad.patientPhone(orgId)), phoneHash: phoneHash(e164) } : {};
 
 const DEFAULT_NOTE = 'Positive screen logged; awaiting receiving facility acknowledgment.';
 const RED_FLAG_NOTE = 'Red-flag positive screen logged with expedited clinical escalation.';
@@ -261,6 +260,7 @@ async function insertCase(tx: Tx, auth: AuthContext, input: NewCaseInput, refs: 
         nameEnc: encryptField(name, aad.patientName(auth.orgId)),
         nameTokens: nameTokens(auth.orgId, name),
         label: input.patientLabel?.trim() || 'Screened',
+        ...phoneColumns(auth.orgId, input.patientPhone),
       },
       select: { id: true },
     });
@@ -348,9 +348,6 @@ export const reassignCase = (auth: AuthContext, ref: string, input: { coordinato
 
 // ───────────────────────────── consent ─────────────────────────────
 
-const OPT_OUT_CHANNELS = ['SMS', 'WHATSAPP', 'VOICE'] as const;
-const RESTORE_CHANNELS = ['SMS', 'WHATSAPP'] as const; // voice stays human-routed
-
 /**
  * Records or reverses a patient's opt-out. Append-only: an opt-out revokes every channel in one
  * batch; a restore re-grants only the channels the patient had actually granted before.
@@ -365,29 +362,16 @@ export async function setOptOut(auth: AuthContext, ref: string, optedOut: boolea
     const currentlyOptedOut = toCaseDto(row, now).optedOut;
     if (currentlyOptedOut === optedOut) return toCaseDto(row, now);
 
-    // Take a stable, strictly-later timestamp than anything already recorded for this patient.
-    const newest = rows.reduce((m, r) => Math.max(m, r.recordedAt.getTime()), 0);
-    const at = new Date(Math.max(now.getTime(), newest + 1));
-
+    const at = nextConsentTime(rows, now);
     if (optedOut) {
-      for (const channel of OPT_OUT_CHANNELS) {
-        await tx.consent.create({
-          data: { patientId: row.patientId, channel, granted: false, event: 'OPTED_OUT', recordedById: auth.userId, recordedAt: at,
-            lawfulBasis: 'Patient opt-out; automated contact disabled, human coordinator only' },
-        });
-      }
+      await recordOptOut(tx, { patientId: row.patientId, userId: auth.userId, at, basis: 'Patient opt-out; automated contact disabled, human coordinator only' });
       await audit(tx, auth, 'CONSENT_OPTOUT_RECORDED', ref, 'Patient opted out of automated SMS/WhatsApp; routed to human coordinator.');
     } else {
-      const everGranted = RESTORE_CHANNELS.filter((ch) => rows.some((r) => r.channel === ch && r.granted && r.event !== 'OPTED_OUT'));
-      if (everGranted.length === 0) {
+      const channels = restorableChannels(rows);
+      if (channels.length === 0) {
         throw new HttpError(409, 'NO_PRIOR_CONSENT', 'The patient never gave consent for automated contact, so there is nothing to restore');
       }
-      for (const channel of everGranted) {
-        await tx.consent.create({
-          data: { patientId: row.patientId, channel, granted: true, event: 'RESTORED', recordedById: auth.userId, recordedAt: at,
-            lawfulBasis: 'Patient confirmed they wish to be contacted again' },
-        });
-      }
+      await recordRestore(tx, { patientId: row.patientId, channels, userId: auth.userId, at, basis: 'Patient confirmed they wish to be contacted again' });
       await audit(tx, auth, 'CONSENT_RESTORED', ref, 'Patient follow-up consent restored.');
     }
     return reload(tx, auth, ref, now);
@@ -423,6 +407,7 @@ async function bulkInsertCases(tx: Tx, auth: AuthContext, items: BulkItem[], now
         return {
           orgId: auth.orgId, patientCode: code, nameEnc: encryptField(name, aad.patientName(auth.orgId)),
           nameTokens: nameTokens(auth.orgId, name), label: input.patientLabel?.trim() || 'Screened',
+          ...phoneColumns(auth.orgId, input.patientPhone),
         };
       }),
       select: { id: true, patientCode: true },

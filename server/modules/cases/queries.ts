@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Prisma } from '../../db/generated/client';
+import { ESCALATION_WINDOW_HOURS } from '../../../shared/types';
 import { nameTokens } from '../../lib/searchIndex';
 import { caseScope } from '../../middleware/tenant';
 import type { AuthContext } from '../../types';
@@ -45,6 +46,15 @@ export function searchWhere(auth: AuthContext, q: string): Prisma.ReferralCaseWh
       ...(tokens.length > 0 ? [{ patient: { nameTokens: { hasEvery: tokens } } }] : []),
     ],
   };
+}
+
+/**
+ * Referrals that need attention now: escalated, red-flagged, or with a deadline already passed or within
+ * about 12 hours (rounded the way `slaHoursRemaining` is, so this agrees with what the dashboard shows).
+ */
+export function escalationWhere(now: Date): Prisma.ReferralCaseWhereInput {
+  const windowEnd = new Date(now.getTime() + (ESCALATION_WINDOW_HOURS + 0.5) * 3_600_000);
+  return { stage: { not: 'CLOSED' }, OR: [{ stage: 'ESCALATED' }, { redFlag: true }, { slaDueAt: { lt: windowEnd } }] };
 }
 
 export function buildCaseWhere(auth: AuthContext, f: Partial<ListQuery>, now: Date): Prisma.ReferralCaseWhereInput {

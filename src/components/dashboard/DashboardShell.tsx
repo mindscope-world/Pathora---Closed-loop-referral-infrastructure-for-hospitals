@@ -22,17 +22,11 @@ import { AuthUserSession, useAuth } from '../../auth/AuthProvider';
 import { can, type Permission } from '../../../shared/permissions';
 import { PATHWAY_LABELS, type CaseDto, type ImportCasesResponse, type PathwayId } from '../../../shared/types';
 import * as workspaceApi from '../../api/workspace';
+import * as commsApi from '../../api/comms';
 import { ApiError } from '../../lib/api';
 import { describeApiError, useWorkspace } from '../../data/useWorkspace';
+import { useMetrics } from '../../data/useMetrics';
 import {
-  AuditEvent,
-  CommsLogEntry,
-  INITIAL_AUDIT_EVENTS,
-  INITIAL_COMMS_LOG,
-  INITIAL_RULE_PACKS,
-  INITIAL_TEAM,
-  PathwayRulePack,
-  TeamMember,
 } from '../../data/dashboardData';
 import { OverviewView } from './OverviewView';
 import { CasesView } from './CasesView';
@@ -40,7 +34,9 @@ import { FacilitiesView } from './FacilitiesView';
 import { EscalationsView } from './EscalationsView';
 import { CommsConsentView } from './CommsConsentView';
 import { PathwaysView } from './PathwaysView';
-import { AuditView, SettingsView } from './AuditSettingsViews';
+import { AuditView } from './AuditView';
+import { NotificationBell } from './NotificationBell';
+import { SettingsView } from './SettingsView';
 import { ReferralProgressTracker, deriveReferralJourney } from './ReferralProgressTracker';
 
 export type DashboardTab =
@@ -58,14 +54,6 @@ interface DashboardShellProps {
   onExitDashboard: () => void;
 }
 
-function nowTimestamp(): string {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(
-    now.getHours()
-  )}:${pad(now.getMinutes())}`;
-}
-
 export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellProps) {
   const { user } = useAuth();
   const role = user?.role;
@@ -78,13 +66,10 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   // Referrals, facilities and assignable owners come from the API.
   const ws = useWorkspace(role);
   const { cases, facilities, assignees } = ws;
+  // Headline figures are computed by the server; reload them whenever the case list changes.
+  const metrics = useMetrics(activeTab === 'overview', ws.cases);
 
-  // Still demo data until their phases land: comms log (Phase 7), rule packs (Phase 6),
-  // audit trail (Phase 4) and team (Phase 5).
-  const [commsLog, setCommsLog] = useState<CommsLogEntry[]>(INITIAL_COMMS_LOG);
-  const [rulePacks, setRulePacks] = useState<PathwayRulePack[]>(INITIAL_RULE_PACKS);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(INITIAL_AUDIT_EVENTS);
-  const [team, setTeam] = useState<TeamMember[]>(INITIAL_TEAM);
+  // Everything on this dashboard is server-backed. The audit trail records each action itself (see AuditView).
 
   // Global Header Search State
   const [globalQuery, setGlobalQuery] = useState('');
@@ -109,6 +94,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   const [newPatientName, setNewPatientName] = useState('');
   const [newPatientCode, setNewPatientCode] = useState('');
   const [newPatientLabel, setNewPatientLabel] = useState('');
+  const [newPatientPhone, setNewPatientPhone] = useState('');
   const [newPathway, setNewPathway] = useState<PathwayId>('CANCER_SCREENING');
   const [newSourceProgram, setNewSourceProgram] = useState('Nairobi Mobile Screening');
   const [newCoordinator, setNewCoordinator] = useState('');
@@ -137,33 +123,6 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
   }, [assignees, facilities, user?.id, newCoordinator, newFacility]);
 
   const selectedCase = cases.find((c) => c.id === selectedCaseId) ?? null;
-  const actorName = currentUser?.name ?? user?.name ?? 'Unknown user';
-  const actorRole = currentUser?.role ?? '';
-
-  /** Local record for the demo Audit & Exports screen. Phase 4 replaces it with the server's audit trail. */
-  const appendAudit = (
-    actor: string,
-    role: string,
-    action: string,
-    resourceId: string,
-    detail: string
-  ) => {
-    setAuditEvents((prev) => [
-      {
-        id: `AUD-${500 + prev.length + 1}`,
-        timestamp: nowTimestamp(),
-        actor,
-        role,
-        action,
-        resourceId,
-        detail,
-      },
-      ...prev,
-    ]);
-  };
-  const localAudit = (action: string, resourceId: string, detail: string) =>
-    appendAudit(actorName, actorRole, action, resourceId, detail);
-
   /**
    * Runs one case action against the API and swaps in the server's version of the case.
    * Failures are shown to the user; if our view of the case was stale we refresh it.
@@ -189,13 +148,11 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
 
   // Case Actions
   const handleAcknowledgeCase = async (caseId: string) => {
-    const dto = await run(() => workspaceApi.acknowledgeCase(caseId, versionOf(caseId)));
-    if (dto) localAudit('FACILITY_ACKNOWLEDGED', caseId, 'Confirmed referral receipt via Receiving Facility Desk.');
+    await run(() => workspaceApi.acknowledgeCase(caseId, versionOf(caseId)));
   };
 
   const handleConfirmAttendance = async (caseId: string) => {
-    const dto = await run(() => workspaceApi.confirmAttendance(caseId, versionOf(caseId)));
-    if (dto) localAudit('ATTENDANCE_CONFIRMED', caseId, 'Confirmed patient clinical attendance at receiving facility.');
+    await run(() => workspaceApi.confirmAttendance(caseId, versionOf(caseId)));
   };
 
   const handleDocumentClosure = async (e: FormEvent) => {
@@ -208,93 +165,30 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
         selectedCase.version
       )
     );
-    if (dto) {
-      localAudit('OUTCOME_VERIFIED_CLOSURE', selectedCase.id, `Closed case with verified outcome: ${closureReasonInput}`);
-      setOutcomeSourceInput('');
-    }
+    if (dto) setOutcomeSourceInput('');
   };
 
   const handleEscalateToClinicalLead = async (caseId: string, reason: string) => {
-    const dto = await run(() => workspaceApi.escalateCase(caseId, { reason }, versionOf(caseId)));
-    if (dto) localAudit('CASE_ESCALATED', caseId, reason);
+    await run(() => workspaceApi.escalateCase(caseId, { reason }, versionOf(caseId)));
   };
 
   const handleLogBarrierResolution = async (caseId: string, barrierNote: string) => {
-    const dto = await run(() => workspaceApi.resolveBarrier(caseId, { note: barrierNote }, versionOf(caseId)));
-    if (dto) localAudit('BARRIER_RESOLUTION_LOGGED', caseId, barrierNote);
+    await run(() => workspaceApi.resolveBarrier(caseId, { note: barrierNote }, versionOf(caseId)));
   };
 
   const handleReassignOwner = async (caseId: string, coordinatorId: string) => {
-    const dto = await run(() => workspaceApi.reassignCase(caseId, coordinatorId, versionOf(caseId)));
-    if (dto) localAudit('CASE_REASSIGNED', caseId, `Named ownership transferred to ${dto.coordinator.name}.`);
+    await run(() => workspaceApi.reassignCase(caseId, coordinatorId, versionOf(caseId)));
   };
 
-  const handleSendMessage = (
-    caseId: string,
-    channel: 'SMS' | 'WhatsApp',
-    templateName: string
-  ) => {
-    const target = cases.find((c) => c.id === caseId);
-    if (!target) return;
-    const status = target.optedOut ? 'Blocked (Opt-out)' : 'Delivered';
-
-    setCommsLog((prev) => [
-      {
-        id: `MSG-${900 + prev.length + 1}`,
-        caseId,
-        patientCode: target.patientCode,
-        channel,
-        templateName,
-        deliveryStatus: status,
-        timestamp: nowTimestamp(),
-      },
-      ...prev,
-    ]);
-
-    appendAudit(
-      target.coordinator,
-      'Programme Coordinator',
-      target.optedOut ? 'MESSAGE_BLOCKED_OPTOUT' : 'DISCREET_MESSAGE_SENT',
-      caseId,
-      target.optedOut
-        ? `Blocked ${channel} template (${templateName}) due to recorded patient opt-out.`
-        : `Sent discreet ${channel} template "${templateName}".`
-    );
+  const handleSetChannelConsent = async (caseId: string, channel: 'SMS' | 'WHATSAPP', granted: boolean) => {
+    await run(() => commsApi.setChannelConsent(caseId, { channel, granted }));
   };
 
   const handleToggleOptOut = async (caseId: string) => {
     const target = cases.find((c) => c.id === caseId);
     if (!target) return;
     const nextOptOut = !target.optedOut;
-    const dto = await run(() => workspaceApi.setOptOut(caseId, nextOptOut));
-    if (dto) {
-      localAudit(
-        nextOptOut ? 'CONSENT_OPTOUT_RECORDED' : 'CONSENT_RESTORED',
-        caseId,
-        nextOptOut
-          ? 'Patient opted out of automated SMS/WhatsApp; routed to human coordinator.'
-          : 'Patient follow-up consent restored.'
-      );
-    }
-  };
-
-  const handleUpdateRulePackSla = (
-    id: string,
-    ackSlaHours: number,
-    evalTargetDays: number
-  ) => {
-    setRulePacks((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, ackSlaHours, evalTargetDays } : p
-      )
-    );
-    appendAudit(
-      'Dr. Grace Njeri',
-      'Partner Clinical Lead',
-      'RULE_PACK_UPDATED',
-      id,
-      `Updated facility acknowledgment SLA to ${ackSlaHours}h and evaluation target to ${evalTargetDays} days.`
-    );
+    await run(() => workspaceApi.setOptOut(caseId, nextOptOut));
   };
 
   const handleCreateNewCase = async (e: FormEvent) => {
@@ -316,6 +210,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           patientName: newPatientName.trim() || undefined,
           patientCode: newPatientCode.trim() || undefined,
           patientLabel: newPatientLabel.trim() || undefined,
+          patientPhone: newPatientPhone.trim() || undefined,
           pathway: newPathway,
           sourceProgram: newSourceProgram.trim(),
           coordinatorId: newCoordinator,
@@ -327,14 +222,10 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
       );
       ws.upsertCase(dto);
       createKey.current = crypto.randomUUID();
-      localAudit(
-        'CASE_CREATED',
-        dto.id,
-        `Logged ${PATHWAY_LABELS[dto.pathway]} positive screen (${dto.patientCode}) routed to ${dto.facility.name}.`
-      );
       setNewPatientName('');
       setNewPatientCode('');
       setNewPatientLabel('');
+      setNewPatientPhone('');
       setNewRedFlag(false);
       setNewCaseModalOpen(false);
       setActiveTab('cases');
@@ -374,9 +265,6 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
       if (!dryRun) {
         csvKey.current = crypto.randomUUID();
         await ws.reload(true);
-        if (res.imported > 0) {
-          localAudit('CSV_BATCH_IMPORTED', `BATCH-${res.imported}`, `Imported ${res.imported} consented referrals via secure CSV intake.`);
-        }
         if (res.imported > 0 && res.rejected === 0) {
           setTimeout(() => {
             setCsvModalOpen(false);
@@ -652,6 +540,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           })()}
 
           <div className="flex items-center gap-2.5 shrink-0">
+            <NotificationBell onOpenCase={(ref) => setSelectedCaseId(ref)} />
             {allowed('cases.import') && (
             <button
               type="button"
@@ -704,6 +593,11 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           {activeTab === 'overview' && (
             <OverviewView
               cases={cases}
+              overview={metrics.overview}
+              upcoming={metrics.upcoming}
+              upcomingCases={metrics.upcomingCases}
+              metricsError={metrics.error}
+              onRetryMetrics={() => void metrics.reload()}
               onSelectCase={(c) => setSelectedCaseId(c.id)}
               onNavigate={(tab) => setActiveTab(tab)}
             />
@@ -727,6 +621,8 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
               onSelectCase={(c) => setSelectedCaseId(c.id)}
               canAcknowledge={allowed('cases.acknowledge')}
               canConfirmAttendance={allowed('cases.attend')}
+              canManage={allowed('facilities.manage')}
+              onFacilitiesChanged={() => void ws.reload(true)}
             />
           )}
           {activeTab === 'escalations' && (
@@ -742,56 +638,28 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
           {activeTab === 'comms' && (
             <CommsConsentView
               cases={cases}
-              commsLog={commsLog}
-              onSendMessage={handleSendMessage}
-              onToggleOptOut={handleToggleOptOut}
+              canSend={allowed('comms.send')}
               canManageConsent={allowed('consent.manage')}
+              canManageTemplates={allowed('templates.manage')}
+              canApproveTemplates={allowed('templates.approve')}
+              onToggleOptOut={handleToggleOptOut}
+              onSetChannelConsent={handleSetChannelConsent}
+              onCasesChanged={() => void ws.reload(true)}
             />
           )}
           {activeTab === 'pathways' && (
-            <PathwaysView
-              rulePacks={rulePacks}
-              onUpdateRulePackSla={handleUpdateRulePackSla}
-            />
+            <PathwaysView canEdit={allowed('rulepacks.edit')} />
           )}
           {activeTab === 'audit' && (
-            <AuditView
-              auditEvents={auditEvents}
-              cases={cases}
-              onExportLogged={(exportType) =>
-                appendAudit(
-                  'Miriam Wanjiku',
-                  'Programme Coordinator',
-                  'DATA_EXPORTED',
-                  'REPORT',
-                  `Exported ${exportType}.`
-                )
-              }
-            />
+            <AuditView canExport={allowed('exports.create')} />
           )}
           {activeTab === 'settings' && (
             <SettingsView
-              team={team}
-              onToggleMemberActive={(id) =>
-                setTeam((prev) =>
-                  prev.map((m) => (m.id === id ? { ...m, active: !m.active } : m))
-                )
-              }
-              onAddTeamMember={(member) => {
-                const newMember: TeamMember = {
-                  ...member,
-                  id: `USR-0${team.length + 1}`,
-                  active: true,
-                };
-                setTeam((prev) => [...prev, newMember]);
-                appendAudit(
-                  'Programme Manager',
-                  'Programme Manager',
-                  'TEAM_USER_ADDED',
-                  newMember.id,
-                  `Added ${newMember.name} as ${newMember.role}.`
-                );
-              }}
+              currentUserId={user?.id ?? ''}
+              canManageOrg={allowed('org.manage')}
+              canReadTeam={allowed('team.read')}
+              canManageTeam={allowed('team.manage')}
+              facilities={facilities}
             />
           )}
             </>
@@ -1086,6 +954,22 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                 </div>
               </div>
 
+              <div>
+                <label htmlFor="new-phone" className="block font-semibold text-[#061B3A] mb-1">
+                  Patient mobile number <span className="font-normal text-slate-500">(optional, for consented SMS follow-up)</span>
+                </label>
+                <input
+                  id="new-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="off"
+                  value={newPatientPhone}
+                  onChange={(e) => setNewPatientPhone(e.target.value)}
+                  placeholder="0712 345 678"
+                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-lg font-mono"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-[#061B3A] mb-1">Pathway</label>
@@ -1203,7 +1087,7 @@ export function DashboardShell({ currentUser, onExitDashboard }: DashboardShellP
                   Phase 1 Secure CSV Batch Intake
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Format: PatientCode, CohortLabel, Pathway, SourceProgram, Owner, Facility [, PatientName]
+                  Format: PatientCode, CohortLabel, Pathway, SourceProgram, Owner, Facility [, PatientName [, MobileNumber]]
                 </p>
               </div>
               <button

@@ -7,59 +7,62 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { ReferralCase } from '../../data/dashboardData';
-import { formatDate } from '../../data/caseViewModel';
+import type { OverviewMetricsDto, UpcomingMetricsDto } from '../../../shared/types';
 
 interface DashboardSummaryProps {
-  cases: ReferralCase[];
+  /** Server-computed figures; null until the first response arrives. */
+  overview: OverviewMetricsDto | null;
+  upcoming: UpcomingMetricsDto | null;
+  /** The soonest upcoming referrals, ready to display. */
+  upcomingCases: ReferralCase[];
+  error: string | null;
+  onRetry: () => void;
   onNavigate: (tab: 'cases' | 'facilities' | 'escalations') => void;
   onSelectCase: (c: ReferralCase) => void;
 }
 
 export function DashboardSummary({
-  cases,
+  overview,
+  upcoming,
+  upcomingCases: upcomingAppointments,
+  error,
+  onRetry,
   onNavigate,
   onSelectCase,
 }: DashboardSummaryProps) {
-  const totalCases = cases.length;
+  if (!overview || !upcoming) {
+    return (
+      <section aria-label="Dashboard aggregate summary" aria-busy={!error} className="bg-white border border-slate-200 rounded-xl p-5 text-sm text-slate-500">
+        {error ? (
+          <div role="alert" className="flex flex-wrap items-center gap-3 text-red-700">
+            <span>Could not load programme figures. {error}</span>
+            <button type="button" onClick={onRetry} className="text-xs font-semibold underline cursor-pointer">
+              Try again
+            </button>
+          </div>
+        ) : (
+          'Loading programme figures…'
+        )}
+      </section>
+    );
+  }
 
-  // 1. Active Referrals (all non-closed cases)
-  const activeReferrals = cases.filter((c) => c.status !== 'Closed Verified');
-
-  // 2. Pending Care Completions (active referrals still awaiting final clinical outcome verification)
-  const pendingCareCompletions = cases.filter(
-    (c) =>
-      c.status !== 'Closed Verified' &&
-      (Boolean(c.milestones.facilityAcknowledgedAt) ||
-        c.stage === 'Attended' ||
-        c.stage === 'Acknowledged' ||
-        c.status === 'Awaiting Ack' ||
-        c.status === 'Overdue SLA')
-  );
-  const attendedAwaitingOutcome = cases.filter(
-    (c) => c.status !== 'Closed Verified' && Boolean(c.milestones.patientAttendedAt)
-  ).length;
-
-  // 3. Upcoming Appointments for the Week (active scheduled / due within 7-day window)
-  const upcomingAppointments = cases
-    .filter((c) => {
-      if (c.status === 'Closed Verified') return false;
-      const dueMs = Date.parse(c.dueDate);
-      // Start of today (East Africa Time): a case due today still counts as due this week.
-      const refMs = Date.parse(formatDate(new Date().toISOString()));
-      const diffDays = Number.isNaN(dueMs) ? 0 : (dueMs - refMs) / (1000 * 60 * 60 * 24);
-      const withinWeek = diffDays >= 0 && diffDays <= 7;
-      return withinWeek || Boolean(c.milestones.facilityAcknowledgedAt && !c.milestones.patientAttendedAt);
-    })
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-
-  // 4. Verified Care Completed & Overdue SLA
-  const completedCases = cases.filter((c) => c.status === 'Closed Verified');
-  const overdueCases = cases.filter((c) => c.status === 'Overdue SLA');
-  const completionRate =
-    totalCases > 0 ? Math.round((completedCases.length / totalCases) * 100) : 0;
+  const totalCases = overview.total;
+  const activeReferrals = { length: overview.activeReferrals };
+  const pendingCareCompletions = { length: overview.pendingCareCompletions };
+  const attendedAwaitingOutcome = overview.attendedAwaitingOutcome;
+  const completedCases = { length: overview.statusCounts.closedVerified };
+  const overdueCases = { length: overview.statusCounts.overdueSla };
+  const completionRate = overview.completionRate;
+  const upcomingCount = upcoming.count;
 
   return (
     <section aria-label="Dashboard aggregate summary" className="space-y-4">
+      {error && (
+        <div role="status" className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Showing the last figures received. {error}
+        </div>
+      )}
       {/* Aggregate Summary Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {/* Active Referrals */}
@@ -129,7 +132,7 @@ export function DashboardSummary({
             </div>
             <div className="mt-2.5 flex items-baseline gap-2">
               <span className="font-display text-3xl font-bold text-[#061B3A] tabular-nums">
-                {upcomingAppointments.length}
+                {upcomingCount}
               </span>
               <span className="text-xs text-[#00828C] font-medium">
                 Scheduled this week
@@ -214,11 +217,11 @@ export function DashboardSummary({
             </p>
           </div>
           <span className="font-mono text-xs tabular-nums text-slate-500">
-            {upcomingAppointments.length} scheduled
+            {upcomingCount} scheduled
           </span>
         </div>
 
-        {upcomingAppointments.length === 0 ? (
+        {upcomingCount === 0 ? (
           <p className="py-3 text-xs text-slate-500">
             No upcoming referral appointments scheduled in the next 7 days.
           </p>

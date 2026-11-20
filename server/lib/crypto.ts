@@ -51,4 +51,5 @@ export function decryptField(envelope: Uint8Array, aad: string): string {
 export const aad = {
   patientName: (orgId: string) => `Patient.name:${orgId}`,
   patientPhone: (orgId: string) => `Patient.phone:${orgId}`,
+  apiKeySigning: (orgId: string, keyId: string) => `FacilityApiKey.signing:${orgId}:${keyId}`,
 };

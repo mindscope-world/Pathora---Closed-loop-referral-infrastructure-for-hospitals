@@ -1,0 +1,14 @@
+node_modules
+dist
+server.js
+.git
+.github
+.data
+.env
+.env.*
+!.env.example
+docs
+*.md
+!package.json
+coverage
+**/*.test.ts
