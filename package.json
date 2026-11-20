@@ -77,5 +77,8 @@
     "typescript": "^7.0.2",
     "vitest": "^5.1.1",
     "yaml": "^2.9.1"
+  },
+  "overrides": {
+    "effect": "3.22.1"
   }
 }
