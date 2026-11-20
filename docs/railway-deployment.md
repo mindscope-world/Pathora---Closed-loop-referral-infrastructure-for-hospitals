@@ -59,6 +59,8 @@ Until it matches what is in the browser, sign-in returns 403.
    FIELD_ENCRYPTION_KEY=<the key from section 2>
    APP_URL=https://<your-service>.up.railway.app
    MESSAGING_PROVIDER=mock
+   PORT=4000
+   HOST=0.0.0.0
    TRUST_PROXY=1
    LOG_LEVEL=info
    ```

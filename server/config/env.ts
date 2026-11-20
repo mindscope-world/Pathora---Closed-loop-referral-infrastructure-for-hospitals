@@ -43,6 +43,9 @@ export function parseTrustProxy(raw: string): number | string {
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
+  // Interface to listen on. Unset = Node's default (all interfaces, IPv6 dual-stack). Set 0.0.0.0 for hosts whose proxy
+  // cannot reach a dual-stack socket.
+  HOST: z.string().min(1).optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
   DATABASE_URL: z.string().url().startsWith('postgres'),
