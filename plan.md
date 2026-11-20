@@ -541,16 +541,16 @@ The landing copy promises "secure CSV now, partner EMR APIs and FHIR later".
   integration beyond `*_FILE`, object-storage exports (local disk behind a `FileStore` interface), `FIELD_ENCRYPTION_KEY` rotation tooling,
   an actual penetration test, and the hosting decisions (region, encryption at rest, PITR, backup retention) that the DPIA marks for people.
 
-#### Render deployment (after Phase 11)
+#### Deployment (after Phase 11; first written for Render, now Railway)
 
-- **`render.yaml`** Blueprint (validated against Render's published schema): one Docker web service plus managed Postgres, health check on
-  `/readyz`, `preDeployCommand: npx prisma migrate deploy`, generated JWT/cookie secrets, and the three values a person must choose
-  (`FIELD_ENCRYPTION_KEY`, `APP_URL`, `MESSAGING_PROVIDER`) left out of the repository on purpose. A test checks the blueprint against the
+- **`railway.json`**: builds the Dockerfile, health check on `/readyz`, `preDeployCommand: npx prisma migrate deploy`, one replica. Railway
+  keeps variables and the database outside the file, so the guide lists them (generated JWT/cookie secrets; `FIELD_ENCRYPTION_KEY`, `APP_URL`,
+  `MESSAGING_PROVIDER` chosen by a person and never in the repository). A test checks the config and the documented variable set against the
   app's own environment schema and production guard.
 - **Migrations:** the runtime image now contains the pinned Prisma CLI, config and migrations, so it can run `prisma migrate deploy` itself;
   `docker-entrypoint.sh` adds an opt-in `MIGRATE_ON_START=true` (exits without starting the app if migrations fail).
 - **`TRUST_PROXY`** is configurable (hop count or proxy list; `true` refused), with an operator-only `GET /diagnostics/client-ip` to verify it.
-- `docs/render-deployment.md`: decisions, setup and post-deploy checks. Region, plan and backups remain decisions for people.
+- `docs/railway-deployment.md`: decisions, setup and post-deploy checks. Region, plan and backups remain decisions for people.
 
 ---
 

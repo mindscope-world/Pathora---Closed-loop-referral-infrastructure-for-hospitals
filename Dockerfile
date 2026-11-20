@@ -2,7 +2,7 @@
 # Multi-stage build. Targets:
 #   runtime (default, last stage) - the app: API + built frontend, production dependencies plus the Prisma CLI, non-root.
 #                       It can apply migrations itself: `npx prisma migrate deploy` (a platform pre-deploy step), or set
-#                       MIGRATE_ON_START=true. Platforms that build the Dockerfile's last stage (Render) get this one.
+#                       MIGRATE_ON_START=true. Platforms that build the Dockerfile's last stage (Railway) get this one.
 #   migrate           - a separate image that only applies migrations, for pipelines that prefer to keep that step apart.
 
 FROM node:22-bookworm-slim AS build
