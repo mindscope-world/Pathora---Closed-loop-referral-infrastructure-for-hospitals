@@ -96,7 +96,7 @@ a domain for the service, and set the variables listed in the guide (`DATABASE_U
 
 > **`APP_URL` must exactly match the address people type in the browser** (same scheme, host and port; `www` is not the bare
 > domain). Requests from any other origin are refused with `403 CORS_DENIED`, so a wrong value makes **sign-in fail for
-> everyone**. Generate the domain first and paste the real `https://…up.railway.app` address as `APP_URL`; if you later attach a custom domain, update `APP_URL` and redeploy.
+> everyone**. Generate the domain first (its target port must equal the `port` in the app's `Pathora API listening` log line; Railway sets `PORT`, do not set it yourself, and a mismatch is a 502) and paste the real `https://…up.railway.app` address as `APP_URL`; if you later attach a custom domain, update `APP_URL` and redeploy.
 
 **4. Check it works.**
 

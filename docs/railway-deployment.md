@@ -48,7 +48,12 @@ Until it matches what is in the browser, sign-in returns 403.
 2. In Railway: **New Project → Deploy from GitHub repo**, pick the repository and branch. Railway reads `railway.json`
    and builds the `Dockerfile`. The first deploy will fail its health check until the database and variables exist; that
    is expected.
-3. On the service, **Settings → Networking → Generate Domain** (or add your own domain). Set the region under **Settings**.
+3. Set the region under **Settings**. Then **Settings → Networking → Generate Domain** (or add your own domain). Railway
+   chooses the port the app listens on and sets `PORT` itself (8080 at the time of writing); **do not set `PORT` yourself.**
+   When the domain asks for a target port, enter the port the app really uses: after the first successful start, open the
+   `Pathora API listening` line in the deploy logs and read `port`. If the domain's port differs from it, every request
+   fails with a 502 (`Application failed to respond`) even though the logs look healthy. To change it later, open the domain
+   under **Networking** and edit the target port.
 4. In the same project: **New → Database → Add PostgreSQL**. Check the version is 16 (what docker-compose and CI use).
 5. On the web service, open **Variables → Raw Editor** and enter:
 
@@ -59,8 +64,6 @@ Until it matches what is in the browser, sign-in returns 403.
    FIELD_ENCRYPTION_KEY=<the key from section 2>
    APP_URL=https://<your-service>.up.railway.app
    MESSAGING_PROVIDER=mock
-   PORT=4000
-   HOST=0.0.0.0
    TRUST_PROXY=1
    LOG_LEVEL=info
    ```
@@ -74,7 +77,7 @@ Until it matches what is in the browser, sign-in returns 403.
    `All migrations have been successfully applied` and then `Pathora API listening`. Railway only switches traffic over
    once `/readyz` returns 200.
 
-Optional variables: `SMTP_URL` and `MAIL_FROM` (invitations, alert emails), `LEADS_NOTIFY_EMAIL`, the `AT_*` provider
+Optional variables: `HOST=0.0.0.0` (only if the proxy cannot reach the default dual-stack listener; not needed on Railway so far), `SMTP_URL` and `MAIL_FROM` (invitations, alert emails), `LEADS_NOTIFY_EMAIL`, the `AT_*` provider
 credentials plus `MESSAGING_WEBHOOK_SECRET` if you chose `africastalking`, `METRICS_TOKEN` (check 5 in section 4 needs it).
 
 > If the pre-deploy step is not available to you, remove `preDeployCommand` from `railway.json` and set
