@@ -37,8 +37,10 @@ openssl rand -base64 32
 - It must be `https://…` in production; the app **refuses to start** with an `http` address.
 
 Which address? Either your own domain, or the one Railway gives the service, `https://<name>.up.railway.app`. Generate it
-first (section 3, step 3) and then use `https://${{RAILWAY_PUBLIC_DOMAIN}}` as the value, so it follows the real domain;
-or paste the real address. Until it matches what is in the browser, sign-in returns 403.
+first (section 3, step 3) and then paste the real address as a literal value, e.g.
+`https://pathora-production.up.railway.app`. (`https://${{RAILWAY_PUBLIC_DOMAIN}}` also works, but if it is not substituted
+the app refuses to start with `APP_URL: must be https in production`, so the literal address is the safer choice.)
+Until it matches what is in the browser, sign-in returns 403.
 
 ## 3. Create it
 
@@ -55,7 +57,7 @@ or paste the real address. Until it matches what is in the browser, sign-in retu
    JWT_SECRET=${{secret(48, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")}}
    COOKIE_SECRET=${{secret(48, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")}}
    FIELD_ENCRYPTION_KEY=<the key from section 2>
-   APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+   APP_URL=https://<your-service>.up.railway.app
    MESSAGING_PROVIDER=mock
    TRUST_PROXY=1
    LOG_LEVEL=info
@@ -63,7 +65,8 @@ or paste the real address. Until it matches what is in the browser, sign-in retu
 
    `Postgres` is the database service's name; change it if you renamed it. The two secrets must be different from each
    other. Set `MESSAGING_PROVIDER=africastalking` only when you mean to send real messages. Use your own domain in
-   `APP_URL` instead of `RAILWAY_PUBLIC_DOMAIN` if you attach one.
+   `APP_URL` instead if you attach one. If the logs show `Invalid environment configuration`, a variable is missing or
+   `APP_URL` does not start with `https://`.
 6. **Deploy.** Railway builds the image, then runs `npx prisma migrate deploy` **before** the new version starts. If a
    migration fails the deploy is aborted and the previous version keeps serving. Watch the deploy logs for
    `All migrations have been successfully applied` and then `Pathora API listening`. Railway only switches traffic over
